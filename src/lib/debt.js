@@ -264,6 +264,35 @@ export function purchasedReturned(customerId, data) {
   return map
 }
 
+/**
+ * Bảng công nợ cuối của từng khách tính đến `date` — phục vụ xuất Excel/CSV.
+ * Trả về mảng {customer, opening, orders, returns, payments, adjust, end}
+ */
+export function customerDebtRows(data, date) {
+  return data.customers.map((c) => {
+    let orders = 0
+    let returns = 0
+    let payments = 0
+    let adjust = 0
+    for (const e of eventsFor(c.id, data)) {
+      if (e.date > date) continue
+      if (e.kind === KIND.ORDER) orders += e.delta
+      else if (e.kind === KIND.RETURN) returns += -e.delta
+      else if (e.kind === KIND.PAYMENT) payments += -e.delta
+      else if (e.kind === KIND.ADJUST) adjust += e.delta
+    }
+    return {
+      customer: c,
+      opening: Number(c.openingDebt?.amount || 0),
+      orders,
+      returns,
+      payments,
+      adjust,
+      end: balanceAt(c.id, data, date),
+    }
+  })
+}
+
 /** Tổng tiền hàng khách đã lấy trong khoảng [from, to] (tổng giá trị các đơn, có đếm đơn). */
 export function purchaseTotal(customerId, data, from, to) {
   let total = 0

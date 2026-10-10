@@ -9,6 +9,8 @@ import {
   Percent,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
+import { customerDebtRows } from '../lib/debt'
+import { todayISO, toCsv, downloadText } from '../lib/format'
 import { Card, Button, Field, Input, Switch, Confirm } from '../components/ui'
 import { useToast } from '../components/Toast'
 
@@ -59,6 +61,47 @@ export default function SettingsPage() {
     a.download = `congno-backup-${new Date().toISOString().slice(0, 10)}.json`
     a.click()
     toast.success('Đã xuất dữ liệu JSON')
+  }
+
+  // Xuất bảng công nợ cuối của khách hàng (CSV — mở bằng Excel)
+  const exportDebt = () => {
+    const date = todayISO()
+    const rows = customerDebtRows(data, date)
+    const head = [
+      'STT',
+      'Khách hàng',
+      'SĐT',
+      'Nợ đầu kỳ',
+      'Tổng đơn hàng',
+      'Hàng trả',
+      'Đã thu',
+      'Phát sinh',
+      'Dư nợ cuối',
+    ]
+    const body = rows.map((r, i) => [
+      i + 1,
+      r.customer.name,
+      r.customer.phone || '',
+      r.opening,
+      r.orders,
+      r.returns,
+      r.payments,
+      r.adjust,
+      r.end,
+    ])
+    const totals = [
+      '',
+      'TỔNG CỘNG',
+      '',
+      rows.reduce((s, r) => s + r.opening, 0),
+      rows.reduce((s, r) => s + r.orders, 0),
+      rows.reduce((s, r) => s + r.returns, 0),
+      rows.reduce((s, r) => s + r.payments, 0),
+      rows.reduce((s, r) => s + r.adjust, 0),
+      rows.reduce((s, r) => s + r.end, 0),
+    ]
+    downloadText(`cong-no-khach-${date}.csv`, toCsv([head, ...body, totals]), 'text/csv;charset=utf-8')
+    toast.success(`Đã xuất công nợ ${rows.length} khách`)
   }
 
   return (
@@ -165,6 +208,9 @@ export default function SettingsPage() {
         <p className="flex items-center gap-2 text-[14px] font-bold text-slate-700">
           <Download size={16} className="text-indigo-500" /> Dữ liệu
         </p>
+        <Button variant="outline" icon={Download} className="w-full" onClick={exportDebt}>
+          Xuất công nợ khách (CSV — Excel)
+        </Button>
         <Button variant="outline" icon={Download} className="w-full" onClick={exportData}>
           Xuất toàn bộ dữ liệu (JSON)
         </Button>

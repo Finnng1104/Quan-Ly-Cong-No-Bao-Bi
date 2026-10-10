@@ -9,6 +9,7 @@ import {
   eventsFor,
   purchasedReturned,
   purchaseTotal,
+  customerDebtRows,
 } from './debt'
 import { createOrder } from '../api/mockApi'
 import { fmtMoney, fmtQty, fmtDate } from './format'
@@ -235,6 +236,27 @@ describe('chi phí phát sinh trong đơn + tổng hàng lấy', () => {
     expect(s.total).toBe(12500)
     expect(s.count).toBe(1)
     expect(purchaseTotal(C1, data, '2026-10-09', '2026-10-10').total).toBe(0)
+  })
+})
+
+describe('customerDebtRows — xuất công nợ cuối', () => {
+  it('bóc tách đúng nợ đầu/đơn/trả/thu/phát sinh/dư cuối', () => {
+    const data = baseData()
+    data.adjustments = [
+      { id: 'a1', customerId: C1, date: '2026-10-09', seq: 2, amount: 30000 },
+    ]
+    data.payments = [
+      { id: 'pay1', customerId: C1, date: '2026-10-09', seq: 3, amount: 30000 },
+    ]
+    const r = customerDebtRows(data, '2026-10-10').find((x) => x.customer.id === C1)
+    expect(r.opening).toBe(59356)
+    expect(r.orders).toBe(12500)
+    expect(r.returns).toBe(0)
+    expect(r.payments).toBe(30000)
+    expect(r.adjust).toBe(30000)
+    expect(r.end).toBe(59356 + 12500 - 30000 + 30000)
+    // công thức khớp: đầu + đơn + phát sinh − trả − thu = cuối
+    expect(r.opening + r.orders + r.adjust - r.returns - r.payments).toBe(r.end)
   })
 })
 

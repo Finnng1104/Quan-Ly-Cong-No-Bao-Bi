@@ -75,3 +75,25 @@ export function normalize(str) {
     .replace(/đ/g, 'd')
     .trim()
 }
+
+/** Tải một file text/CSV về máy (dùng cho xuất dữ liệu). */
+export function downloadText(filename, content, mime = 'text/plain;charset=utf-8') {
+  const blob = new Blob([content], { type: mime })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+/** Xuất CSV tiếng Việt mở được bằng Excel (BOM UTF-8 + dấu ';' phân cách). */
+export function toCsv(rows) {
+  const esc = (v) => {
+    const s = String(v ?? '')
+    return s.includes(';') || s.includes('"') || s.includes('\n')
+      ? `"${s.replace(/"/g, '""')}"`
+      : s
+  }
+  return '﻿' + rows.map((r) => r.map(esc).join(';')).join('\r\n')
+}

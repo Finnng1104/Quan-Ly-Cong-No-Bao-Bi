@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Search, UserPlus, ChevronRight, ArrowDownWideNarrow, CalendarDays } from 'lucide-react'
+import { Search, UserPlus, ChevronRight, ArrowDownWideNarrow, CalendarDays, Download } from 'lucide-react'
 import { useStore } from '../store/useStore'
-import { debtsByCustomer, dayActivitiesByCustomer } from '../lib/debt'
-import { normalize, todayISO, fmtMoney } from '../lib/format'
+import { debtsByCustomer, dayActivitiesByCustomer, customerDebtRows } from '../lib/debt'
+import { normalize, todayISO, fmtMoney, fmtDate, toCsv, downloadText } from '../lib/format'
 import { Card, Money, Empty, Modal, Button, Field, Input, Textarea } from '../components/ui'
 import { Avatar } from '../components/pickers'
 import { useToast } from '../components/Toast'
@@ -100,6 +100,50 @@ export default function CustomersPage() {
   const shown = list.slice(0, limit)
   const totalDebt = list.reduce((s, c) => s + c.debt, 0)
 
+  // Xuất danh sách công nợ cuối của khách hàng (CSV — mở bằng Excel)
+  const exportDebt = () => {
+    const rows = customerDebtRows(data, date)
+    const head = [
+      'STT',
+      'Khách hàng',
+      'SĐT',
+      'Nợ đầu kỳ',
+      'Tổng đơn hàng',
+      'Hàng trả',
+      'Đã thu',
+      'Phát sinh',
+      'Dư nợ cuối',
+    ]
+    const body = rows.map((r, i) => [
+      i + 1,
+      r.customer.name,
+      r.customer.phone || '',
+      r.opening,
+      r.orders,
+      r.returns,
+      r.payments,
+      r.adjust,
+      r.end,
+    ])
+    const totals = [
+      '',
+      'TỔNG CỘNG',
+      '',
+      rows.reduce((s, r) => s + r.opening, 0),
+      rows.reduce((s, r) => s + r.orders, 0),
+      rows.reduce((s, r) => s + r.returns, 0),
+      rows.reduce((s, r) => s + r.payments, 0),
+      rows.reduce((s, r) => s + r.adjust, 0),
+      rows.reduce((s, r) => s + r.end, 0),
+    ]
+    downloadText(
+      `cong-no-khach-${date}.csv`,
+      toCsv([head, ...body, totals]),
+      'text/csv;charset=utf-8',
+    )
+    toast.success(`Đã xuất công nợ ${rows.length} khách đến ${fmtDate(date)}`)
+  }
+
   return (
     <div className="animate-fade-up space-y-4">
       <div className="flex items-center justify-between">
@@ -116,9 +160,18 @@ export default function CustomersPage() {
             />
           </label>
         </div>
-        <Button icon={UserPlus} onClick={() => setFormOpen(true)}>
-          Thêm khách
-        </Button>
+        <div className="flex gap-2">
+          <button
+            onClick={exportDebt}
+            title="Xuất công nợ khách (CSV — Excel)"
+            className="flex h-11 w-11 items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-600 active:bg-emerald-100"
+          >
+            <Download size={18} />
+          </button>
+          <Button icon={UserPlus} onClick={() => setFormOpen(true)}>
+            Thêm khách
+          </Button>
+        </div>
       </div>
 
       <div className="relative">
