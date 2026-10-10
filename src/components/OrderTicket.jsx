@@ -50,6 +50,12 @@ const OrderTicket = forwardRef(function OrderTicket(
           <span className="text-slate-500">Ngày: </span>
           <b>{fmtDate(order.date)}</b>
         </p>
+        {order.note && (
+          <p>
+            <span className="text-slate-500">Ghi chú: </span>
+            {order.note}
+          </p>
+        )}
       </div>
 
       {/* bảng dòng hàng — đúng thứ tự cột */}
@@ -105,7 +111,9 @@ const OrderTicket = forwardRef(function OrderTicket(
         {order.vat?.amount > 0 && (
           <>
             <div className="flex justify-between text-indigo-700">
-              <span>Tiền VAT hóa đơn ({order.vat.rate}%)</span>
+              <span>
+                Tiền VAT hóa đơn{order.vat.manual ? ' (nhập tay)' : ` (${order.vat.rate}%)`}
+              </span>
               <span className="tabular-nums">+{fmtMoney(order.vat.amount)} đ</span>
             </div>
             <div className="flex justify-between text-[15px]">

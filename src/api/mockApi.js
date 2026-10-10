@@ -124,16 +124,20 @@ const lineTotal = (lines) => lines.reduce((s, l) => s + signed(l), 0)
 const sellTotal = (lines) =>
   lines.reduce((s, l) => s + (l.type === 'return' ? 0 : l.amount), 0)
 
-// Tiền VAT hóa đơn cộng vào công nợ khách (thu trên tổng hàng bán, không tính hàng trả)
-function makeVat(lines, vat, vatRate = 8) {
+// Tiền VAT hóa đơn cộng vào công nợ khách (thu trên tổng hàng bán, không tính hàng trả;
+// cho phép nhập tay số tiền VAT — manual)
+function makeVat(lines, vat, vatRate = 8, vatAmount) {
   if (!vat) return null
-  return { rate: vatRate, amount: Math.round(sellTotal(lines) * (vatRate / 100)) }
+  const manual = vatAmount !== undefined && vatAmount !== null && vatAmount !== ''
+  return manual
+    ? { rate: vatRate, amount: Math.round(Number(vatAmount) || 0), manual: true }
+    : { rate: vatRate, amount: Math.round(sellTotal(lines) * (vatRate / 100)) }
 }
 
-export function createOrder(state, { customerId, date, lines, vat, vatRate }) {
+export function createOrder(state, { customerId, date, lines, vat, vatRate, vatAmount, note }) {
   const ls = makeLines(lines)
   const orderNo = state.counters.orderNo + 1
-  const vatObj = makeVat(ls, vat, vatRate)
+  const vatObj = makeVat(ls, vat, vatRate, vatAmount)
   const order = {
     id: uid('o'),
     code: `HĐ-${String(orderNo).padStart(4, '0')}`,
@@ -143,6 +147,7 @@ export function createOrder(state, { customerId, date, lines, vat, vatRate }) {
     createdAt: nowISO(),
     lines: ls,
     vat: vatObj,
+    note: note || '',
     total: lineTotal(ls) + (vatObj?.amount || 0),
     editHistory: [],
     lastEditAt: null,
@@ -155,17 +160,23 @@ export function createOrder(state, { customerId, date, lines, vat, vatRate }) {
   }
 }
 
-export function updateOrder(state, orderId, { customerId, date, lines, vat, vatRate }, lookups) {
+export function updateOrder(
+  state,
+  orderId,
+  { customerId, date, lines, vat, vatRate, vatAmount, note },
+  lookups,
+) {
   const orders = state.orders.map((o) => {
     if (o.id !== orderId) return o
     const ls = makeLines(lines)
-    const vatObj = makeVat(ls, vat, vatRate)
+    const vatObj = makeVat(ls, vat, vatRate, vatAmount)
     const next = {
       ...o,
       customerId,
       date,
       lines: ls,
       vat: vatObj,
+      note: note ?? o.note ?? '',
       total: lineTotal(ls) + (vatObj?.amount || 0),
     }
     const diff = diffOrders(o, next, lookups)
@@ -241,6 +252,36 @@ export function createPayment(state, { customerId, date, amount, note }) {
 
 export function deletePayment(state, id) {
   return { payments: state.payments.map((p) => (p.id === id ? { ...p, deletedAt: nowISO() } : p)) }
+}
+
+// ---------- Phát sinh công nợ tự do (tiền ship, VAT số, bớt nợ...) ----------
+// amount > 0 = cộng nợ, amount < 0 = trừ nợ
+export function createAdjustment(state, { customerId, date, amount, note }) {
+  const no = (state.counters.adjustNo || 0) + 1
+  const rec = {
+    id: uid('ps'),
+    code: `PS-${String(no).padStart(4, '0')}`,
+    customerId,
+    date,
+    seq: nextSeq(state).seq,
+    createdAt: nowISO(),
+    amount: Number(amount) || 0,
+    note: note || '',
+    deletedAt: null,
+  }
+  return {
+    adjustments: [...(state.adjustments || []), rec],
+    counters: { ...nextSeq(state), adjustNo: no },
+    _created: rec,
+  }
+}
+
+export function deleteAdjustment(state, id) {
+  return {
+    adjustments: (state.adjustments || []).map((a) =>
+      a.id === id ? { ...a, deletedAt: nowISO() } : a,
+    ),
+  }
 }
 
 // ---------- Sao kê ----------

@@ -9,9 +9,15 @@
 
 import { dayBeforeISO } from './format'
 
-export const KIND = { OPENING: 'opening', ORDER: 'order', RETURN: 'return', PAYMENT: 'payment' }
+export const KIND = {
+  OPENING: 'opening',
+  ORDER: 'order',
+  RETURN: 'return',
+  PAYMENT: 'payment',
+  ADJUST: 'adjust',
+}
 
-const KIND_RANK = { opening: 0, order: 1, return: 2, payment: 3 }
+const KIND_RANK = { opening: 0, order: 1, adjust: 2, return: 3, payment: 4 }
 
 function cmpEvent(a, b) {
   if (a.date !== b.date) return a.date < b.date ? -1 : 1
@@ -67,6 +73,18 @@ export function eventsFor(customerId, data) {
       desc: 'Thanh toán',
     })
   }
+  for (const a of data.adjustments || []) {
+    if (a.customerId !== customerId || a.deletedAt) continue
+    const amt = Number(a.amount)
+    evs.push({
+      kind: KIND.ADJUST,
+      date: a.date,
+      seq: a.seq ?? 0,
+      delta: amt,
+      refId: a.id,
+      desc: a.note || (amt >= 0 ? 'Phát sinh cộng nợ' : 'Phát sinh trừ nợ'),
+    })
+  }
   return evs.sort(cmpEvent)
 }
 
@@ -114,6 +132,25 @@ export function totalDebtAt(data, date) {
   let sum = 0
   for (const c of data.customers) sum += balanceAt(c.id, data, date)
   return sum
+}
+
+/**
+ * Công nợ PHÁT SINH của từng khách trong đúng ngày `date`:
+ * map customerId -> {up, down} (up = tổng đơn, down = tổng thu + hàng trả)
+ */
+export function dayActivitiesByCustomer(data, date) {
+  const map = {}
+  const acc = (id) => (map[id] ||= { up: 0, down: 0 })
+  for (const o of data.orders) {
+    if (!o.deletedAt && o.date === date) acc(o.customerId).up += Number(o.total)
+  }
+  for (const r of data.returns) {
+    if (!r.deletedAt && r.date === date) acc(r.customerId).down += Number(r.total)
+  }
+  for (const p of data.payments) {
+    if (!p.deletedAt && p.date === date) acc(p.customerId).down += Number(p.amount)
+  }
+  return map
 }
 
 /** Tổng đơn / thu / trả của đúng 1 ngày. */
@@ -258,9 +295,12 @@ export function diffOrders(oldOrder, next, lookups) {
       newVat === 0
         ? `Bỏ tiền VAT (−${fmtMoney(oldVat)})`
         : oldVat === 0
-          ? `Thêm tiền VAT ${next.vat.rate}%: +${fmtMoney(newVat)}`
+          ? `Thêm tiền VAT${next.vat.manual ? ' (nhập tay)' : ` ${next.vat.rate}%`}: +${fmtMoney(newVat)}`
           : `Tiền VAT: ${fmtMoney(oldVat)} → ${fmtMoney(newVat)}`,
     )
+  }
+  if ((oldOrder.note || '') !== (next.note || '')) {
+    changes.push('Đổi ghi chú đơn')
   }
   const oldById = new Map(oldOrder.lines.map((l) => [l.id, l]))
   const newById = new Map(next.lines.map((l) => [l.id, l]))

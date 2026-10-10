@@ -230,6 +230,43 @@ export function buildSeed() {
     { id: 'tt008', code: 'TT-0008', customerId: 'c06', date: d(0), seq: ++seq, createdAt: ts(0, 10, 15), amount: 80000, note: '', deletedAt: null },
   ]
 
+  // ===== Phát sinh công nợ tự do (tiền ship, tiền VAT số, bớt nợ...) =====
+  const adjustments = [
+    {
+      id: 'ps001',
+      code: 'PS-0001',
+      customerId: 'c02',
+      date: d(5),
+      seq: ++seq,
+      createdAt: ts(5, 16),
+      amount: 30000,
+      note: 'Tiền ship',
+      deletedAt: null,
+    },
+    {
+      id: 'ps002',
+      code: 'PS-0002',
+      customerId: 'c03',
+      date: d(2),
+      seq: ++seq,
+      createdAt: ts(2, 17, 30),
+      amount: 120000,
+      note: 'Tiền VAT hóa đơn số',
+      deletedAt: null,
+    },
+    {
+      id: 'ps003',
+      code: 'PS-0003',
+      customerId: 'c05',
+      date: d(1),
+      seq: ++seq,
+      createdAt: ts(1, 10),
+      amount: -20000,
+      note: 'Bớt nợ — khách quen',
+      deletedAt: null,
+    },
+  ]
+
   // ===== Lần xuất sao kê gần nhất của Chị Hoa (đơn HĐ-0010 sửa sau đó) =====
   const statementExports = [
     { id: 'se1', customerId: 'c03', from: d(14), to: d(3), exportedAt: ts(3, 18, 0) },
@@ -245,6 +282,7 @@ export function buildSeed() {
     returns,
     payments,
     statementExports,
-    counters: { orderNo, returnNo: 3, paymentNo: 8, seq },
+    adjustments,
+    counters: { orderNo, returnNo: 3, paymentNo: 8, adjustNo: 3, seq },
   }
 }

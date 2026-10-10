@@ -14,7 +14,7 @@ import {
 import { useStore, customerName } from '../store/useStore'
 import { purchasedReturned } from '../lib/debt'
 import { todayISO, fmtMoney, fmtQty, uid } from '../lib/format'
-import { Card, Button, Field, Input, Switch } from '../components/ui'
+import { Card, Button, Field, Input, Switch, Textarea } from '../components/ui'
 import { PickerModal, PickerButton, Avatar } from '../components/pickers'
 import ProductCombo from '../components/ProductCombo'
 import { useToast } from '../components/Toast'
@@ -34,6 +34,8 @@ export default function OrderFormPage() {
   const [customerId, setCustomerId] = useState('')
   const [date, setDate] = useState(todayISO())
   const [vatEnabled, setVatEnabled] = useState(false)
+  const [vatManual, setVatManual] = useState('') // tiền VAT nhập tay (để trống = tự tính)
+  const [note, setNote] = useState('')
   const [lines, setLines] = useState([newLine()])
   const [custPicker, setCustPicker] = useState(false)
   const [addingUnitFor, setAddingUnitFor] = useState(null) // lineId đang thêm quy cách
@@ -48,6 +50,8 @@ export default function OrderFormPage() {
       setCustomerId(editing.customerId)
       setDate(editing.date)
       setVatEnabled(!!editing.vat)
+      setVatManual(editing.vat?.manual ? String(editing.vat.amount) : '')
+      setNote(editing.note || '')
       setLines(
         editing.lines.map((l) => ({
           id: l.id,
@@ -62,6 +66,8 @@ export default function OrderFormPage() {
       setCustomerId(data.orderDraft.customerId || '')
       setDate(data.orderDraft.date || todayISO())
       setVatEnabled(!!data.orderDraft.vatEnabled)
+      setVatManual(data.orderDraft.vatManual || '')
+      setNote(data.orderDraft.note || '')
       setLines(data.orderDraft.lines?.length ? data.orderDraft.lines : [newLine()])
       if (data.orderDraft.customerId) toast.info('Đã khôi phục đơn đang nhập dở')
     } else if (sp.get('khach')) {
@@ -75,11 +81,11 @@ export default function OrderFormPage() {
     if (editing || !hydrated.current) return
     const t = setTimeout(() => {
       if (customerId || lines.some((l) => l.productId)) {
-        setOrderDraft({ customerId, date, lines, vatEnabled })
+        setOrderDraft({ customerId, date, lines, vatEnabled, vatManual, note })
       }
     }, 400)
     return () => clearTimeout(t)
-  }, [customerId, date, lines, vatEnabled, editing, setOrderDraft])
+  }, [customerId, date, lines, vatEnabled, vatManual, note, editing, setOrderDraft])
 
   const lineAmount = (l) => Math.round((Number(l.qty) || 0) * (Number(l.price) || 0))
   const signedAmount = (l) => (l.type === 'return' ? -lineAmount(l) : lineAmount(l))
@@ -93,7 +99,8 @@ export default function OrderFormPage() {
     0,
   )
   const vatRate = data.settings.vatRate ?? 8
-  const vatAmount = vatEnabled ? Math.round(sellTotal * (vatRate / 100)) : 0
+  const vatAuto = Math.round(sellTotal * (vatRate / 100))
+  const vatAmount = vatEnabled ? (vatManual !== '' ? Number(vatManual) || 0 : vatAuto) : 0
   const total = goodsTotal + vatAmount
 
   const updateLine = (lid, patch) =>
@@ -143,6 +150,8 @@ export default function OrderFormPage() {
         lines: valid.map((l) => ({ ...l, qty: Number(l.qty), price: Number(l.price) || 0 })),
         vat: vatEnabled,
         vatRate,
+        vatAmount: vatManual !== '' ? Number(vatManual) || 0 : undefined,
+        note: note.trim(),
       },
       editing?.id,
     )
@@ -399,22 +408,58 @@ export default function OrderFormPage() {
           label={`Xuất hóa đơn — thu tiền VAT ${vatRate}%`}
         />
         {vatEnabled && (
-          <div className="mt-2.5 space-y-1 rounded-xl bg-indigo-50/60 px-3.5 py-2.5 text-[13px] font-semibold">
-            <div className="flex justify-between text-slate-500">
+          <div className="mt-2.5 space-y-2 rounded-xl bg-indigo-50/60 px-3.5 py-2.5">
+            <div className="flex justify-between text-[13px] font-semibold text-slate-500">
               <span>Tổng hàng bán</span>
               <span className="tabular-nums">{fmtMoney(sellTotal)} đ</span>
             </div>
-            <div className="flex justify-between text-indigo-700">
-              <span className="flex items-center gap-1.5">
-                <BadgePercent size={14} /> Tiền VAT hóa đơn ({vatRate}%)
+            <div className="flex items-center gap-2">
+              <span className="flex flex-1 items-center gap-1.5 text-[13px] font-semibold text-indigo-700">
+                <BadgePercent size={14} /> Tiền VAT hóa đơn
               </span>
-              <span className="tabular-nums">+{fmtMoney(vatAmount)} đ</span>
+              <div className="relative w-36">
+                <Input
+                  inputMode="numeric"
+                  value={vatManual !== '' ? fmtMoney(vatManual) : fmtMoney(vatAuto)}
+                  onChange={(e) => setVatManual(e.target.value.replace(/[^0-9]/g, ''))}
+                  placeholder={fmtMoney(vatAuto)}
+                  className={`h-9 pr-7 text-right text-[13.5px] font-bold ${vatManual !== '' ? 'border-indigo-400 bg-white' : ''
+                    }`}
+                />
+                <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[12px] font-semibold text-slate-400">
+                  đ
+                </span>
+              </div>
             </div>
-            <p className="text-[11px] font-medium text-slate-400">
-              Tiền VAT cộng vào công nợ — khách thanh toán sau
-            </p>
+            <div className="flex items-center justify-between text-[11px] font-medium text-slate-400">
+              <span>
+                {vatManual !== ''
+                  ? `Đang nhập tay (tự tính ${vatRate}% = ${fmtMoney(vatAuto)} đ)`
+                  : `Tự tính ${vatRate}% — chạm để nhập tay`}
+              </span>
+              {vatManual !== '' && (
+                <button
+                  onClick={() => setVatManual('')}
+                  className="font-bold text-indigo-600"
+                >
+                  Về tự tính
+                </button>
+              )}
+            </div>
           </div>
         )}
+      </Card>
+
+      {/* ghi chú phiếu */}
+      <Card className="p-4">
+        <Field label="Ghi chú (hiện trên phiếu)">
+          <Textarea
+            rows={2}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="VD: giao trước 5h chiều, thiếu 2 cây giao sau..."
+          />
+        </Field>
       </Card>
 
       {/* thanh tổng cố định */}

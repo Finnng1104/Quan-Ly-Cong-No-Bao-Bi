@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Search, UserPlus, ChevronRight, ArrowDownWideNarrow, CalendarDays } from 'lucide-react'
 import { useStore } from '../store/useStore'
-import { debtsByCustomer } from '../lib/debt'
+import { debtsByCustomer, dayActivitiesByCustomer } from '../lib/debt'
 import { normalize, todayISO, fmtMoney } from '../lib/format'
 import { Card, Money, Empty, Modal, Button, Field, Input, Textarea } from '../components/ui'
 import { Avatar } from '../components/pickers'
@@ -89,9 +89,10 @@ export default function CustomersPage() {
 
   const list = useMemo(() => {
     const debts = debtsByCustomer(data, date)
+    const acts = dayActivitiesByCustomer(data, date)
     const nq = normalize(q)
     return data.customers
-      .map((c) => ({ ...c, debt: debts[c.id] || 0 }))
+      .map((c) => ({ ...c, debt: debts[c.id] || 0, act: acts[c.id] || { up: 0, down: 0 } }))
       .filter((c) => !nq || normalize(c.name + ' ' + c.phone).includes(nq))
       .sort((a, b) => (sortDesc ? b.debt - a.debt : a.debt - b.debt) || a.name.localeCompare(b.name, 'vi'))
   }, [data, date, q, sortDesc])
@@ -170,6 +171,14 @@ export default function CustomersPage() {
                   value={c.debt}
                   className={`text-[14.5px] ${c.debt > 0 ? 'text-amber-600' : 'text-slate-400'}`}
                 />
+                {(c.act.up > 0 || c.act.down > 0) && (
+                  <p className="text-[10.5px] font-semibold tabular-nums">
+                    <span className="text-slate-400">PS </span>
+                    {c.act.up > 0 && <span className="text-rose-500">+{fmtMoney(c.act.up)}</span>}
+                    {c.act.up > 0 && c.act.down > 0 && <span className="text-slate-300"> · </span>}
+                    {c.act.down > 0 && <span className="text-emerald-600">−{fmtMoney(c.act.down)}</span>}
+                  </p>
+                )}
                 {c.debt <= 0 && <p className="text-[10.5px] font-semibold text-emerald-500">Hết nợ</p>}
               </div>
               <ChevronRight size={16} className="shrink-0 text-slate-300" />

@@ -94,6 +94,10 @@ export const useStore = create(
       addPayment: (payload) => get().apply(api.createPayment, payload),
       removePayment: (id) => get().apply(api.deletePayment, id),
 
+      // ---------- phát sinh công nợ tự do ----------
+      addAdjustment: (payload) => get().apply(api.createAdjustment, payload),
+      removeAdjustment: (id) => get().apply(api.deleteAdjustment, id),
+
       // ---------- statement ----------
       exportStatement: (payload) => get().apply(api.recordStatementExport, payload),
       lastExportOf: (customerId) => api.lastExportOf(get(), customerId),
@@ -120,6 +124,7 @@ export const useStore = create(
         orders: s.orders,
         returns: s.returns,
         payments: s.payments,
+        adjustments: s.adjustments,
         statementExports: s.statementExports,
         counters: s.counters,
         orderDraft: s.orderDraft,

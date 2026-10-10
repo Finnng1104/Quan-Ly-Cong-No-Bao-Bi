@@ -13,18 +13,110 @@ import {
   Pencil,
   History,
   ChevronRight,
+  NotebookPen,
+  Trash2,
 } from 'lucide-react'
 import { useStore, productName, unitName } from '../store/useStore'
 import { balanceAt, fullLedger } from '../lib/debt'
 import { fmtMoney, fmtDate, todayISO } from '../lib/format'
-import { Card, Money, Badge, SegmentedTabs, Empty, Button } from '../components/ui'
+import {
+  Card,
+  Money,
+  Badge,
+  SegmentedTabs,
+  Empty,
+  Button,
+  Modal,
+  Field,
+  Input,
+  Confirm,
+} from '../components/ui'
 import { CustomerForm } from './CustomersPage'
+import { useToast } from '../components/Toast'
 
 const kindMeta = {
   opening: { label: 'Nợ đầu kỳ', tone: 'slate' },
   order: { label: 'Đơn hàng', tone: 'indigo' },
   return: { label: 'Trả hàng', tone: 'amber' },
   payment: { label: 'Thanh toán', tone: 'emerald' },
+  adjust: { label: 'Phát sinh', tone: 'cyan' },
+}
+
+const NOTE_SUGGESTIONS = ['Tiền ship', 'Tiền VAT hóa đơn số', 'Phí giao hàng', 'Bớt nợ khách quen']
+
+function AdjustmentForm({ open, onClose, customer, data }) {
+  const [dir, setDir] = useState(1) // 1 = cộng nợ, -1 = trừ nợ
+  const [date, setDate] = useState(todayISO())
+  const [amount, setAmount] = useState('')
+  const [note, setNote] = useState('')
+  const toast = useToast()
+
+  const save = () => {
+    const amt = Number(amount)
+    if (!amt || amt <= 0) return toast.error('Nhập số tiền phát sinh')
+    data.addAdjustment({ customerId: customer.id, date, amount: amt * dir, note: note.trim() })
+    toast.success(dir > 0 ? `Đã cộng ${fmtMoney(amt)} đ vào công nợ` : `Đã trừ ${fmtMoney(amt)} đ khỏi công nợ`)
+    onClose()
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title={`Phát sinh — ${customer.name}`}>
+      <div className="space-y-3.5">
+        <Field label="Loại phát sinh">
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setDir(1)}
+              className={`h-11 rounded-xl text-[14px] font-bold transition-all ${dir === 1 ? 'bg-rose-500 text-white shadow-md shadow-rose-200' : 'bg-slate-100 text-slate-400'
+                }`}
+            >
+              + Cộng nợ
+            </button>
+            <button
+              onClick={() => setDir(-1)}
+              className={`h-11 rounded-xl text-[14px] font-bold transition-all ${dir === -1 ? 'bg-emerald-500 text-white shadow-md shadow-emerald-200' : 'bg-slate-100 text-slate-400'
+                }`}
+            >
+              − Trừ nợ
+            </button>
+          </div>
+        </Field>
+        <div className="grid grid-cols-[1fr_auto] gap-3">
+          <Field label="Số tiền *">
+            <Input
+              inputMode="numeric"
+              value={amount ? fmtMoney(amount) : ''}
+              onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ''))}
+              placeholder="0"
+              className="text-right font-bold"
+            />
+          </Field>
+          <Field label="Ngày">
+            <div className="w-[136px]">
+              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            </div>
+          </Field>
+        </div>
+        <Field label="Ghi chú">
+          <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="VD: Tiền ship, Tiền VAT hóa đơn số..." />
+        </Field>
+        <div className="flex flex-wrap gap-1.5">
+          {NOTE_SUGGESTIONS.map((s) => (
+            <button
+              key={s}
+              onClick={() => setNote(s)}
+              className={`rounded-full px-3 py-1.5 text-[12px] font-semibold transition-colors ${note === s ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500'
+                }`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+        <Button size="lg" className="w-full" icon={NotebookPen} onClick={save}>
+          Lưu phát sinh
+        </Button>
+      </div>
+    </Modal>
+  )
 }
 
 export default function CustomerDetailPage() {
@@ -35,6 +127,9 @@ export default function CustomerDetailPage() {
   const [date, setDate] = useState(todayISO())
   const [tab, setTab] = useState('ledger')
   const [editOpen, setEditOpen] = useState(false)
+  const [adjustOpen, setAdjustOpen] = useState(false)
+  const [delAdjust, setDelAdjust] = useState(null)
+  const toast = useToast()
 
   const balance = useMemo(() => (customer ? balanceAt(id, data, date) : 0), [customer, id, data, date])
   const ledger = useMemo(
@@ -124,34 +219,41 @@ export default function CustomerDetailPage() {
       </Card>
 
       {/* nút nhanh */}
-      <div className="grid grid-cols-4 gap-2.5">
+      <div className="grid grid-cols-5 gap-2">
         <Link
           to={`/don-moi?khach=${id}`}
-          className="flex flex-col items-center gap-1.5 rounded-2xl bg-indigo-600 py-3.5 text-white shadow-md shadow-indigo-200 active:scale-[0.97]"
+          className="flex flex-col items-center gap-1.5 rounded-2xl bg-indigo-600 py-3 text-white shadow-md shadow-indigo-200 active:scale-[0.97]"
         >
-          <PlusCircle size={21} />
-          <span className="text-[11px] font-semibold">Tạo đơn</span>
+          <PlusCircle size={19} />
+          <span className="text-[10.5px] font-semibold">Tạo đơn</span>
         </Link>
         <Link
           to={`/hang-tra?khach=${id}`}
-          className="flex flex-col items-center gap-1.5 rounded-2xl bg-amber-500 py-3.5 text-white shadow-md shadow-amber-200 active:scale-[0.97]"
+          className="flex flex-col items-center gap-1.5 rounded-2xl bg-amber-500 py-3 text-white shadow-md shadow-amber-200 active:scale-[0.97]"
         >
-          <Undo2 size={21} />
-          <span className="text-[11px] font-semibold">Hàng trả</span>
+          <Undo2 size={19} />
+          <span className="text-[10.5px] font-semibold">Hàng trả</span>
         </Link>
+        <button
+          onClick={() => setAdjustOpen(true)}
+          className="flex flex-col items-center gap-1.5 rounded-2xl bg-violet-600 py-3 text-white shadow-md shadow-violet-200 active:scale-[0.97]"
+        >
+          <NotebookPen size={19} />
+          <span className="text-[10.5px] font-semibold">Phát sinh</span>
+        </button>
         <Link
           to={`/thu-tien?khach=${id}`}
-          className="flex flex-col items-center gap-1.5 rounded-2xl bg-emerald-500 py-3.5 text-white shadow-md shadow-emerald-200 active:scale-[0.97]"
+          className="flex flex-col items-center gap-1.5 rounded-2xl bg-emerald-500 py-3 text-white shadow-md shadow-emerald-200 active:scale-[0.97]"
         >
-          <HandCoins size={21} />
-          <span className="text-[11px] font-semibold">Thu tiền</span>
+          <HandCoins size={19} />
+          <span className="text-[10.5px] font-semibold">Thu tiền</span>
         </Link>
         <Link
           to={`/sao-ke?khach=${id}`}
-          className="flex flex-col items-center gap-1.5 rounded-2xl bg-cyan-600 py-3.5 text-white shadow-md shadow-cyan-200 active:scale-[0.97]"
+          className="flex flex-col items-center gap-1.5 rounded-2xl bg-cyan-600 py-3 text-white shadow-md shadow-cyan-200 active:scale-[0.97]"
         >
-          <FileText size={21} />
-          <span className="text-[11px] font-semibold">Sao kê</span>
+          <FileText size={19} />
+          <span className="text-[10.5px] font-semibold">Sao kê</span>
         </Link>
       </div>
 
@@ -195,9 +297,22 @@ export default function CustomerDetailPage() {
               <div className="text-right">
                 {r.up > 0 && <p className="text-[13.5px] font-bold text-rose-500 tabular-nums">+{fmtMoney(r.up)}</p>}
                 {r.down > 0 && <p className="text-[13.5px] font-bold text-emerald-600 tabular-nums">-{fmtMoney(r.down)}</p>}
-                <p className="text-[11px] font-semibold text-slate-400 tabular-nums">
-                  dư {fmtMoney(r.balance)}
-                </p>
+                <div className="flex items-center justify-end gap-1.5">
+                  <p className="text-[11px] font-semibold text-slate-400 tabular-nums">
+                    dư {fmtMoney(r.balance)}
+                  </p>
+                  {r.kind === 'adjust' && (
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault()
+                        setDelAdjust(r.refId)
+                      }}
+                      className="text-slate-300 hover:text-rose-500"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
               </div>
             </Link>
           ))}
@@ -257,6 +372,24 @@ export default function CustomerDetailPage() {
           ))}
         </Card>
       )}
+
+      <AdjustmentForm
+        open={adjustOpen}
+        onClose={() => setAdjustOpen(false)}
+        customer={customer}
+        data={data}
+      />
+
+      <Confirm
+        open={!!delAdjust}
+        onClose={() => setDelAdjust(null)}
+        onConfirm={() => {
+          data.removeAdjustment(delAdjust)
+          toast.success('Đã xóa phát sinh')
+        }}
+        title="Xóa phát sinh?"
+        message="Khoản phát sinh sẽ bị xóa và công nợ cập nhật lại."
+      />
 
       <CustomerForm
         open={editOpen}

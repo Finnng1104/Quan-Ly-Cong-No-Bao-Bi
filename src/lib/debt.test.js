@@ -195,6 +195,22 @@ describe('tiền VAT hóa đơn', () => {
     expect(orders.at(-1).total).toBe(10000)
     expect(orders.at(-1).vat).toBeNull()
   })
+
+  it('VAT nhập tay dùng đúng số tiền nhập, đánh dấu manual', () => {
+    const data = baseData()
+    data.counters = { orderNo: 1, returnNo: 0, paymentNo: 0, seq: 1 }
+    const { orders } = createOrder(data, {
+      customerId: C2,
+      date: '2026-10-10',
+      lines: [{ productId: 'p1', unitId: 'u1', qty: 10, price: 1000 }],
+      vat: true,
+      vatRate: 8,
+      vatAmount: 3000,
+    })
+    const order = orders.at(-1)
+    expect(order.vat).toEqual({ rate: 8, amount: 3000, manual: true })
+    expect(order.total).toBe(13000)
+  })
 })
 
 describe('diffOrders — lịch sử điều chỉnh', () => {
@@ -223,6 +239,29 @@ describe('diffOrders — lịch sử điều chỉnh', () => {
     expect(d.newTotal).toBe(17500)
     expect(d.diff).toBe(5000)
     expect(d.changes.some((c) => c.includes('SL'))).toBe(true)
+  })
+})
+
+describe('phát sinh công nợ tự do (tiền ship, VAT số, bớt nợ)', () => {
+  it('cộng nợ tăng dư nợ, trừ nợ giảm dư nợ', () => {
+    const data = baseData()
+    data.adjustments = [
+      { id: 'a1', customerId: C1, date: '2026-10-09', seq: 2, amount: 30000, note: 'Tiền ship' },
+      { id: 'a2', customerId: C1, date: '2026-10-09', seq: 3, amount: -5000, note: 'Bớt nợ' },
+    ]
+    expect(balanceAt(C1, data, '2026-10-08')).toBe(71856) // chưa tới ngày phát sinh
+    expect(balanceAt(C1, data, '2026-10-09')).toBe(71856 + 30000 - 5000)
+  })
+
+  it('phát sinh hiện trong sao kê với ghi chú làm diễn giải', () => {
+    const data = baseData()
+    data.adjustments = [
+      { id: 'a1', customerId: C1, date: '2026-10-09', seq: 2, amount: 120000, note: 'Tiền VAT hóa đơn số' },
+    ]
+    const { rows } = ledgerRows(C1, data, '2026-10-05', '2026-10-10')
+    const adj = rows.find((r) => r.kind === 'adjust')
+    expect(adj.desc).toBe('Tiền VAT hóa đơn số')
+    expect(adj.up).toBe(120000)
   })
 })
 
