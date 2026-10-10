@@ -9,7 +9,7 @@ import {
   CalendarDays,
 } from 'lucide-react'
 import { useStore, customerName } from '../store/useStore'
-import { ledgerRows } from '../lib/debt'
+import { ledgerRows, purchaseTotal } from '../lib/debt'
 import { fmtMoney, fmtDate, fmtDateTime, todayISO, addDaysISO } from '../lib/format'
 import { Card, Badge, Empty, Button, Field, Input } from '../components/ui'
 import { PickerModal, PickerButton, Avatar } from '../components/pickers'
@@ -42,6 +42,18 @@ export default function StatementPage() {
   }, [customerId, lastExport, data])
 
   const editedSet = useMemo(() => new Set(editedOrders.map((o) => o.id)), [editedOrders])
+
+  // Tổng tiền hàng khách đã lấy — trong kỳ chọn + 12 tháng gần nhất
+  const buyStats = useMemo(() => {
+    if (!customerId) return null
+    const yearAgo = new Date(to + 'T00:00:00')
+    yearAgo.setFullYear(yearAgo.getFullYear() - 1)
+    const yearFrom = yearAgo.toISOString().slice(0, 10)
+    return {
+      inRange: purchaseTotal(customerId, data, from, to),
+      year: purchaseTotal(customerId, data, yearFrom, to),
+    }
+  }, [customerId, data, from, to])
 
   // chênh lệch tổng của các lần sửa sau mốc xuất
   const totalDiff = useMemo(() => {
@@ -128,6 +140,22 @@ export default function StatementPage() {
               <p className="text-[11.5px] text-slate-500">
                 Kỳ {fmtDate(from)} → {fmtDate(to)}
               </p>
+              {buyStats && (
+                <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[12px] font-semibold">
+                  <span className="text-indigo-700">
+                    Hàng lấy trong kỳ: {fmtMoney(buyStats.inRange.total)} đ
+                    <span className="ml-1 font-medium text-indigo-400">
+                      ({buyStats.inRange.count} đơn)
+                    </span>
+                  </span>
+                  <span className="text-slate-600">
+                    Hàng lấy 12 tháng: {fmtMoney(buyStats.year.total)} đ
+                    <span className="ml-1 font-medium text-slate-400">
+                      ({buyStats.year.count} đơn)
+                    </span>
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* dư đầu khoảng */}

@@ -264,6 +264,19 @@ export function purchasedReturned(customerId, data) {
   return map
 }
 
+/** Tổng tiền hàng khách đã lấy trong khoảng [from, to] (tổng giá trị các đơn, có đếm đơn). */
+export function purchaseTotal(customerId, data, from, to) {
+  let total = 0
+  let count = 0
+  for (const o of data.orders) {
+    if (o.customerId !== customerId || o.deletedAt) continue
+    if (o.date < from || o.date > to) continue
+    total += Number(o.total)
+    count += 1
+  }
+  return { total, count }
+}
+
 /** Chuỗi ngày phục vụ biểu đồ: tổng nợ, doanh số, tiền thu của `n` ngày kết thúc tại `endDate`. */
 export function debtSeries(data, endDate, n, addDaysISO) {
   const out = []
@@ -301,6 +314,17 @@ export function diffOrders(oldOrder, next, lookups) {
   }
   if ((oldOrder.note || '') !== (next.note || '')) {
     changes.push('Đổi ghi chú đơn')
+  }
+  const oldFees = new Map((oldOrder.fees || []).map((f) => [f.id, f]))
+  const newFees = new Map((next.fees || []).map((f) => [f.id, f]))
+  for (const f of next.fees || []) {
+    const prev = oldFees.get(f.id)
+    if (!prev) changes.push(`Thêm phí "${f.name}": +${fmtMoney(f.amount)}`)
+    else if (prev.amount !== f.amount || prev.name !== f.name)
+      changes.push(`Phí "${f.name}": ${fmtMoney(prev.amount)} → ${fmtMoney(f.amount)}`)
+  }
+  for (const f of oldOrder.fees || []) {
+    if (!newFees.has(f.id)) changes.push(`Xóa phí "${f.name}": −${fmtMoney(f.amount)}`)
   }
   const oldById = new Map(oldOrder.lines.map((l) => [l.id, l]))
   const newById = new Map(next.lines.map((l) => [l.id, l]))

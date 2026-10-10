@@ -36,6 +36,7 @@ export default function OrderFormPage() {
   const [vatEnabled, setVatEnabled] = useState(false)
   const [vatManual, setVatManual] = useState('') // tiền VAT nhập tay (để trống = tự tính)
   const [note, setNote] = useState('')
+  const [fees, setFees] = useState([]) // chi phí phát sinh: [{id,name,amount}]
   const [lines, setLines] = useState([newLine()])
   const [custPicker, setCustPicker] = useState(false)
   const [addingUnitFor, setAddingUnitFor] = useState(null) // lineId đang thêm quy cách
@@ -52,6 +53,9 @@ export default function OrderFormPage() {
       setVatEnabled(!!editing.vat)
       setVatManual(editing.vat?.manual ? String(editing.vat.amount) : '')
       setNote(editing.note || '')
+      setFees(
+        (editing.fees || []).map((f) => ({ id: f.id, name: f.name, amount: String(f.amount) })),
+      )
       setLines(
         editing.lines.map((l) => ({
           id: l.id,
@@ -68,6 +72,7 @@ export default function OrderFormPage() {
       setVatEnabled(!!data.orderDraft.vatEnabled)
       setVatManual(data.orderDraft.vatManual || '')
       setNote(data.orderDraft.note || '')
+      setFees(data.orderDraft.fees || [])
       setLines(data.orderDraft.lines?.length ? data.orderDraft.lines : [newLine()])
       if (data.orderDraft.customerId) toast.info('Đã khôi phục đơn đang nhập dở')
     } else if (sp.get('khach')) {
@@ -81,11 +86,11 @@ export default function OrderFormPage() {
     if (editing || !hydrated.current) return
     const t = setTimeout(() => {
       if (customerId || lines.some((l) => l.productId)) {
-        setOrderDraft({ customerId, date, lines, vatEnabled, vatManual, note })
+        setOrderDraft({ customerId, date, lines, vatEnabled, vatManual, note, fees })
       }
     }, 400)
     return () => clearTimeout(t)
-  }, [customerId, date, lines, vatEnabled, vatManual, note, editing, setOrderDraft])
+  }, [customerId, date, lines, vatEnabled, vatManual, note, fees, editing, setOrderDraft])
 
   const lineAmount = (l) => Math.round((Number(l.qty) || 0) * (Number(l.price) || 0))
   const signedAmount = (l) => (l.type === 'return' ? -lineAmount(l) : lineAmount(l))
@@ -101,7 +106,8 @@ export default function OrderFormPage() {
   const vatRate = data.settings.vatRate ?? 8
   const vatAuto = Math.round(sellTotal * (vatRate / 100))
   const vatAmount = vatEnabled ? (vatManual !== '' ? Number(vatManual) || 0 : vatAuto) : 0
-  const total = goodsTotal + vatAmount
+  const feesTotal = fees.reduce((s, f) => s + (Number(f.amount) || 0), 0)
+  const total = goodsTotal + vatAmount + feesTotal
 
   const updateLine = (lid, patch) =>
     setLines((ls) => ls.map((l) => (l.id === lid ? { ...l, ...patch } : l)))
@@ -151,6 +157,9 @@ export default function OrderFormPage() {
         vat: vatEnabled,
         vatRate,
         vatAmount: vatManual !== '' ? Number(vatManual) || 0 : undefined,
+        fees: fees
+          .filter((f) => Number(f.amount) > 0)
+          .map((f) => ({ ...f, name: f.name.trim() || 'Chi phí', amount: Number(f.amount) })),
         note: note.trim(),
       },
       editing?.id,
@@ -450,6 +459,69 @@ export default function OrderFormPage() {
         )}
       </Card>
 
+      {/* chi phí phát sinh — cộng vào công nợ */}
+      <Card className="p-4">
+        <div className="mb-2.5 flex items-center justify-between">
+          <p className="text-[13px] font-bold text-slate-600">Chi phí phát sinh</p>
+          <button
+            onClick={() => setFees((fs) => [...fs, { id: uid('f'), name: '', amount: '' }])}
+            className="flex items-center gap-1 rounded-lg bg-indigo-50 px-2.5 py-1.5 text-[12px] font-bold text-indigo-600 active:bg-indigo-100"
+          >
+            <Plus size={13} /> Thêm phí
+          </button>
+        </div>
+        {fees.length === 0 ? (
+          <p className="text-[12px] text-slate-400">
+            Tiền ship, phí giao hàng, phí khác... — cộng thẳng vào công nợ
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {fees.map((f) => (
+              <div key={f.id} className="flex items-center gap-2">
+                <Input
+                  value={f.name}
+                  onChange={(e) =>
+                    setFees((fs) => fs.map((x) => (x.id === f.id ? { ...x, name: e.target.value } : x)))
+                  }
+                  placeholder="Tiền ship, phí giao..."
+                  className="h-10 flex-1 text-[14px]"
+                />
+                <Input
+                  inputMode="numeric"
+                  value={f.amount ? fmtMoney(f.amount) : ''}
+                  onChange={(e) =>
+                    setFees((fs) =>
+                      fs.map((x) =>
+                        x.id === f.id ? { ...x, amount: e.target.value.replace(/[^0-9]/g, '') } : x,
+                      ),
+                    )
+                  }
+                  placeholder="0"
+                  className="h-10 w-28 text-right text-[14px] font-bold"
+                />
+                <button
+                  onClick={() => setFees((fs) => fs.filter((x) => x.id !== f.id))}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-300 hover:bg-rose-50 hover:text-rose-500"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            ))}
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {['Tiền ship', 'Phí giao hàng', 'Phí bốc xếp'].map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setFees((fs) => [...fs, { id: uid('f'), name: s, amount: '' }])}
+                  className="rounded-full bg-slate-100 px-3 py-1.5 text-[12px] font-semibold text-slate-500 active:bg-slate-200"
+                >
+                  + {s}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </Card>
+
       {/* ghi chú phiếu */}
       <Card className="p-4">
         <Field label="Ghi chú (hiện trên phiếu)">
@@ -478,6 +550,9 @@ export default function OrderFormPage() {
               )}
               {vatAmount > 0 && (
                 <span className="text-indigo-500">+VAT {fmtMoney(vatAmount)}đ</span>
+              )}
+              {feesTotal > 0 && (
+                <span className="text-cyan-600">+phí {fmtMoney(feesTotal)}đ</span>
               )}
             </div>
           </div>

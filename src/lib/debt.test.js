@@ -8,6 +8,7 @@ import {
   diffOrders,
   eventsFor,
   purchasedReturned,
+  purchaseTotal,
 } from './debt'
 import { createOrder } from '../api/mockApi'
 import { fmtMoney, fmtQty, fmtDate } from './format'
@@ -210,6 +211,30 @@ describe('tiền VAT hóa đơn', () => {
     const order = orders.at(-1)
     expect(order.vat).toEqual({ rate: 8, amount: 3000, manual: true })
     expect(order.total).toBe(13000)
+  })
+})
+
+describe('chi phí phát sinh trong đơn + tổng hàng lấy', () => {
+  it('chi phí phát sinh cộng vào tổng đơn và công nợ', () => {
+    const data = baseData()
+    data.counters = { orderNo: 1, returnNo: 0, paymentNo: 0, seq: 1 }
+    const { orders } = createOrder(data, {
+      customerId: C2,
+      date: '2026-10-10',
+      lines: [{ productId: 'p1', unitId: 'u1', qty: 10, price: 1000 }],
+      fees: [{ name: 'Tiền ship', amount: 30000 }, { name: 'Phí giao', amount: 15000 }],
+    })
+    const order = orders.at(-1)
+    expect(order.total).toBe(10000 + 45000)
+    expect(balanceAt(C2, { ...data, orders }, '2026-10-10')).toBe(55000)
+  })
+
+  it('purchaseTotal đếm đơn và tổng tiền hàng trong khoảng', () => {
+    const data = baseData()
+    const s = purchaseTotal(C1, data, '2026-10-05', '2026-10-10')
+    expect(s.total).toBe(12500)
+    expect(s.count).toBe(1)
+    expect(purchaseTotal(C1, data, '2026-10-09', '2026-10-10').total).toBe(0)
   })
 })
 

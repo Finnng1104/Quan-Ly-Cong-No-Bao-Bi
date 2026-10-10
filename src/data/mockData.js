@@ -178,6 +178,13 @@ export function buildSeed() {
     o25.total += 10560
   }
 
+  // Đơn có chi phí phát sinh (tiền ship)
+  const o33 = orders.find((o) => o.code === 'HĐ-0033') // Anh Phúc c15, hôm nay
+  if (o33) {
+    o33.fees = [{ id: 'f1', name: 'Tiền ship', amount: 25000 }]
+    o33.total += 25000
+  }
+
   // ===== Hàng trả =====
   const returns = [
     {

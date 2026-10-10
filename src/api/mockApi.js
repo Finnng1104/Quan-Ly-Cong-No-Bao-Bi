@@ -134,10 +134,18 @@ function makeVat(lines, vat, vatRate = 8, vatAmount) {
     : { rate: vatRate, amount: Math.round(sellTotal(lines) * (vatRate / 100)) }
 }
 
-export function createOrder(state, { customerId, date, lines, vat, vatRate, vatAmount, note }) {
+const feeTotal = (fees) => (fees || []).reduce((s, f) => s + (Number(f.amount) || 0), 0)
+
+export function createOrder(
+  state,
+  { customerId, date, lines, vat, vatRate, vatAmount, fees, note },
+) {
   const ls = makeLines(lines)
   const orderNo = state.counters.orderNo + 1
   const vatObj = makeVat(ls, vat, vatRate, vatAmount)
+  const feeList = (fees || [])
+    .filter((f) => Number(f.amount) > 0)
+    .map((f) => ({ id: f.id || uid('f'), name: f.name || 'Chi phí', amount: Number(f.amount) }))
   const order = {
     id: uid('o'),
     code: `HĐ-${String(orderNo).padStart(4, '0')}`,
@@ -147,8 +155,9 @@ export function createOrder(state, { customerId, date, lines, vat, vatRate, vatA
     createdAt: nowISO(),
     lines: ls,
     vat: vatObj,
+    fees: feeList,
     note: note || '',
-    total: lineTotal(ls) + (vatObj?.amount || 0),
+    total: lineTotal(ls) + (vatObj?.amount || 0) + feeTotal(feeList),
     editHistory: [],
     lastEditAt: null,
     deletedAt: null,
@@ -163,21 +172,25 @@ export function createOrder(state, { customerId, date, lines, vat, vatRate, vatA
 export function updateOrder(
   state,
   orderId,
-  { customerId, date, lines, vat, vatRate, vatAmount, note },
+  { customerId, date, lines, vat, vatRate, vatAmount, fees, note },
   lookups,
 ) {
   const orders = state.orders.map((o) => {
     if (o.id !== orderId) return o
     const ls = makeLines(lines)
     const vatObj = makeVat(ls, vat, vatRate, vatAmount)
+    const feeList = (fees || [])
+      .filter((f) => Number(f.amount) > 0)
+      .map((f) => ({ id: f.id || uid('f'), name: f.name || 'Chi phí', amount: Number(f.amount) }))
     const next = {
       ...o,
       customerId,
       date,
       lines: ls,
       vat: vatObj,
+      fees: feeList,
       note: note ?? o.note ?? '',
-      total: lineTotal(ls) + (vatObj?.amount || 0),
+      total: lineTotal(ls) + (vatObj?.amount || 0) + feeTotal(feeList),
     }
     const diff = diffOrders(o, next, lookups)
     const entry = { editedAt: nowISO(), ...diff }

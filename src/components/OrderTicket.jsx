@@ -16,7 +16,9 @@ const OrderTicket = forwardRef(function OrderTicket(
   const returnTotal = order.lines
     .filter((l) => l.type === 'return')
     .reduce((s, l) => s + l.amount, 0)
-  const linesTotal = order.total - (order.vat?.amount || 0)
+  const feesTotal = (order.fees || []).reduce((s, f) => s + Number(f.amount), 0)
+  const linesTotal = order.total - (order.vat?.amount || 0) - feesTotal
+  const hasExtras = (order.vat?.amount || 0) > 0 || feesTotal > 0
 
   return (
     <div ref={ref} className="ticket-paper mx-auto w-full max-w-[148mm] p-5 text-[13px] leading-snug">
@@ -108,19 +110,25 @@ const OrderTicket = forwardRef(function OrderTicket(
           <span className="font-semibold">TỔNG ĐƠN HÀNG</span>
           <b className="tabular-nums">{fmtMoney(linesTotal)} đ</b>
         </div>
+        {(order.fees || []).map((f) => (
+          <div key={f.id} className="flex justify-between text-cyan-700">
+            <span>{f.name || 'Chi phí phát sinh'}</span>
+            <span className="tabular-nums">+{fmtMoney(f.amount)} đ</span>
+          </div>
+        ))}
         {order.vat?.amount > 0 && (
-          <>
-            <div className="flex justify-between text-indigo-700">
-              <span>
-                Tiền VAT hóa đơn{order.vat.manual ? ' (nhập tay)' : ` (${order.vat.rate}%)`}
-              </span>
-              <span className="tabular-nums">+{fmtMoney(order.vat.amount)} đ</span>
-            </div>
-            <div className="flex justify-between text-[15px]">
-              <span className="font-bold">TỔNG CỘNG</span>
-              <b className="tabular-nums">{fmtMoney(order.total)} đ</b>
-            </div>
-          </>
+          <div className="flex justify-between text-indigo-700">
+            <span>
+              Tiền VAT hóa đơn{order.vat.manual ? ' (nhập tay)' : ` (${order.vat.rate}%)`}
+            </span>
+            <span className="tabular-nums">+{fmtMoney(order.vat.amount)} đ</span>
+          </div>
+        )}
+        {hasExtras && (
+          <div className="flex justify-between text-[15px]">
+            <span className="font-bold">TỔNG CỘNG</span>
+            <b className="tabular-nums">{fmtMoney(order.total)} đ</b>
+          </div>
         )}
         {showDebt && (
           <>
