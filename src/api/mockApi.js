@@ -36,13 +36,13 @@ export function updateCustomer(state, id, payload) {
     customers: state.customers.map((c) =>
       c.id === id
         ? {
-            ...c,
-            name: payload.name ?? c.name,
-            phone: payload.phone ?? c.phone,
-            address: payload.address ?? c.address,
-            note: payload.note ?? c.note,
-            openingDebt: payload.openingDebt ?? c.openingDebt,
-          }
+          ...c,
+          name: payload.name ?? c.name,
+          phone: payload.phone ?? c.phone,
+          address: payload.address ?? c.address,
+          note: payload.note ?? c.note,
+          openingDebt: payload.openingDebt ?? c.openingDebt,
+        }
         : c,
     ),
   }
@@ -50,7 +50,8 @@ export function updateCustomer(state, id, payload) {
 
 // ---------- Sản phẩm & quy cách ----------
 export function createProduct(state, name) {
-  return { products: [...state.products, { id: uid('p'), name }] }
+  const p = { id: uid('p'), name }
+  return { products: [...state.products, p], _created: p }
 }
 export function updateProduct(state, id, name) {
   return { products: state.products.map((p) => (p.id === id ? { ...p, name } : p)) }
@@ -59,7 +60,8 @@ export function deleteProduct(state, id) {
   return { products: state.products.filter((p) => p.id !== id) }
 }
 export function createUnit(state, name) {
-  return { units: [...state.units, { id: uid('u'), name }] }
+  const u = { id: uid('u'), name }
+  return { units: [...state.units, u], _created: u }
 }
 export function updateUnit(state, id, name) {
   return { units: state.units.map((u) => (u.id === id ? { ...u, name } : u)) }
@@ -103,9 +105,13 @@ export function getPrice(state, customerId, productId, unitId) {
 }
 
 // ---------- Đơn hàng ----------
+// dòng "sell" cộng nợ, dòng "return" trừ nợ (hàng trả gộp chung phiếu)
+const signed = (l) => (l.type === 'return' ? -l.amount : l.amount)
+
 function makeLines(lines) {
   return lines.map((l) => ({
     id: l.id || uid('l'),
+    type: l.type === 'return' ? 'return' : 'sell',
     productId: l.productId,
     unitId: l.unitId,
     qty: Number(l.qty) || 0,
@@ -114,9 +120,20 @@ function makeLines(lines) {
   }))
 }
 
-export function createOrder(state, { customerId, date, lines }) {
+const lineTotal = (lines) => lines.reduce((s, l) => s + signed(l), 0)
+const sellTotal = (lines) =>
+  lines.reduce((s, l) => s + (l.type === 'return' ? 0 : l.amount), 0)
+
+// Tiền VAT hóa đơn cộng vào công nợ khách (thu trên tổng hàng bán, không tính hàng trả)
+function makeVat(lines, vat, vatRate = 8) {
+  if (!vat) return null
+  return { rate: vatRate, amount: Math.round(sellTotal(lines) * (vatRate / 100)) }
+}
+
+export function createOrder(state, { customerId, date, lines, vat, vatRate }) {
   const ls = makeLines(lines)
   const orderNo = state.counters.orderNo + 1
+  const vatObj = makeVat(ls, vat, vatRate)
   const order = {
     id: uid('o'),
     code: `HĐ-${String(orderNo).padStart(4, '0')}`,
@@ -125,7 +142,8 @@ export function createOrder(state, { customerId, date, lines }) {
     seq: nextSeq(state).seq,
     createdAt: nowISO(),
     lines: ls,
-    total: ls.reduce((s, l) => s + l.amount, 0),
+    vat: vatObj,
+    total: lineTotal(ls) + (vatObj?.amount || 0),
     editHistory: [],
     lastEditAt: null,
     deletedAt: null,
@@ -137,11 +155,19 @@ export function createOrder(state, { customerId, date, lines }) {
   }
 }
 
-export function updateOrder(state, orderId, { customerId, date, lines }, lookups) {
+export function updateOrder(state, orderId, { customerId, date, lines, vat, vatRate }, lookups) {
   const orders = state.orders.map((o) => {
     if (o.id !== orderId) return o
     const ls = makeLines(lines)
-    const next = { ...o, customerId, date, lines: ls, total: ls.reduce((s, l) => s + l.amount, 0) }
+    const vatObj = makeVat(ls, vat, vatRate)
+    const next = {
+      ...o,
+      customerId,
+      date,
+      lines: ls,
+      vat: vatObj,
+      total: lineTotal(ls) + (vatObj?.amount || 0),
+    }
     const diff = diffOrders(o, next, lookups)
     const entry = { editedAt: nowISO(), ...diff }
     return {

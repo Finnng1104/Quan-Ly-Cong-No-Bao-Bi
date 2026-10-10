@@ -20,7 +20,7 @@ const initialData = () => {
     authed: false,
     username: '',
     password: '123456',
-    settings: { showDebtOnTicket: true, shopName: 'Cửa Hàng Của Tôi' },
+    settings: { showDebtOnTicket: true, shopName: 'Cửa Hàng Của Tôi', vatRate: 8 },
     orderDraft: null,
   }
 }
@@ -46,6 +46,8 @@ export const useStore = create(
       // ---------- settings ----------
       setShowDebtOnTicket: (v) => set((s) => ({ settings: { ...s.settings, showDebtOnTicket: v } })),
       setShopName: (v) => set((s) => ({ settings: { ...s.settings, shopName: v } })),
+      setVatRate: (v) =>
+        set((s) => ({ settings: { ...s.settings, vatRate: Math.max(0, Number(v) || 0) } })),
 
       // ---------- helpers ----------
       apply: (fn, ...args) => {

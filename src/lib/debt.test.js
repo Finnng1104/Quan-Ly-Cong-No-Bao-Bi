@@ -7,7 +7,9 @@ import {
   dailyTotals,
   diffOrders,
   eventsFor,
+  purchasedReturned,
 } from './debt'
+import { createOrder } from '../api/mockApi'
 import { fmtMoney, fmtQty, fmtDate } from './format'
 
 // ===== Dữ liệu kiểm thử =====
@@ -129,6 +131,69 @@ describe('công nợ theo kịch bản nghiệm thu', () => {
     expect(t.orders).toBe(12500)
     expect(t.orderCount).toBe(1)
     expect(t.payments).toBe(30000)
+  })
+})
+
+describe('hàng trả gộp trong phiếu bán', () => {
+  it('dòng trả trừ thẳng vào tổng đơn và công nợ', () => {
+    const data = baseData()
+    data.counters = { orderNo: 1, returnNo: 0, paymentNo: 0, seq: 1 }
+    const { orders } = createOrder(data, {
+      customerId: C1,
+      date: '2026-10-10',
+      lines: [
+        { productId: 'p1', unitId: 'u1', qty: 20, price: 500 },
+        { productId: 'p2', unitId: 'u1', qty: 5, price: 500, type: 'return' },
+      ],
+    })
+    const order = orders.at(-1)
+    expect(order.total).toBe(10000 - 2500) // bán 10.000 trừ trả 2.500
+    const data2 = { ...data, orders }
+    expect(balanceAt(C1, data2, '2026-10-10')).toBe(71856 + 7500)
+  })
+
+  it('purchasedReturned tính cả dòng trả trong đơn', () => {
+    const data = baseData()
+    data.orders[0].lines[1].type = 'return' // 5 A6 thành dòng trả
+    const map = purchasedReturned(C1, data)
+    expect(map.get('p2|u1')).toEqual({ bought: 0, returned: 5 })
+    expect(map.get('p1|u1')).toEqual({ bought: 20, returned: 0 })
+  })
+})
+
+describe('tiền VAT hóa đơn', () => {
+  it('VAT 8% tính trên hàng bán, cộng vào tổng đơn và công nợ', () => {
+    const data = baseData()
+    data.counters = { orderNo: 1, returnNo: 0, paymentNo: 0, seq: 1 }
+    const { orders } = createOrder(data, {
+      customerId: C2,
+      date: '2026-10-10',
+      lines: [
+        { productId: 'p1', unitId: 'u1', qty: 10, price: 1000 },
+        { productId: 'p2', unitId: 'u1', qty: 2, price: 500, type: 'return' },
+      ],
+      vat: true,
+      vatRate: 8,
+    })
+    const order = orders.at(-1)
+    expect(order.vat).toEqual({ rate: 8, amount: 800 }) // 8% của 10.000
+    expect(order.total).toBe(10000 - 1000 + 800)
+    const data2 = { ...data, orders }
+    expect(balanceAt(C2, data2, '2026-10-10')).toBe(9800)
+  })
+
+  it('đơn không bật VAT thì không có tiền VAT', () => {
+    const data = baseData()
+    data.counters = { orderNo: 1, returnNo: 0, paymentNo: 0, seq: 1 }
+    const { orders } = createOrder(data, {
+      customerId: C2,
+      date: '2026-10-10',
+      lines: [{ productId: 'p1', unitId: 'u1', qty: 10, price: 1000 }],
+      vat: false,
+      vatRate: 8,
+    })
+    expect(orders.at(-1).total).toBe(10000)
+    expect(orders.at(-1).vat).toBeNull()
   })
 })
 

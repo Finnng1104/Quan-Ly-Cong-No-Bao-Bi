@@ -1,21 +1,25 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
   Plus,
   Trash2,
   User,
-  Package,
   BadgeDollarSign,
   Save,
+  Undo2,
+  AlertTriangle,
+  BadgePercent,
 } from 'lucide-react'
-import { useStore, productName, customerName } from '../store/useStore'
-import { todayISO, fmtMoney, uid } from '../lib/format'
-import { Card, Button, Field, Input } from '../components/ui'
+import { useStore, customerName } from '../store/useStore'
+import { purchasedReturned } from '../lib/debt'
+import { todayISO, fmtMoney, fmtQty, uid } from '../lib/format'
+import { Card, Button, Field, Input, Switch } from '../components/ui'
 import { PickerModal, PickerButton, Avatar } from '../components/pickers'
+import ProductCombo from '../components/ProductCombo'
 import { useToast } from '../components/Toast'
 
-const newLine = () => ({ id: uid('l'), productId: '', unitId: '', qty: '', price: '' })
+const newLine = (type = 'sell') => ({ id: uid('l'), type, productId: '', unitId: '', qty: '', price: '' })
 
 export default function OrderFormPage() {
   const { id: orderId } = useParams() // có = sửa đơn
@@ -29,9 +33,11 @@ export default function OrderFormPage() {
 
   const [customerId, setCustomerId] = useState('')
   const [date, setDate] = useState(todayISO())
+  const [vatEnabled, setVatEnabled] = useState(false)
   const [lines, setLines] = useState([newLine()])
   const [custPicker, setCustPicker] = useState(false)
-  const [prodPickerFor, setProdPickerFor] = useState(null) // lineId
+  const [addingUnitFor, setAddingUnitFor] = useState(null) // lineId đang thêm quy cách
+  const [newUnitName, setNewUnitName] = useState('')
   const hydrated = useRef(false)
 
   // nạp đơn sửa hoặc nháp
@@ -41,9 +47,11 @@ export default function OrderFormPage() {
     if (editing) {
       setCustomerId(editing.customerId)
       setDate(editing.date)
+      setVatEnabled(!!editing.vat)
       setLines(
         editing.lines.map((l) => ({
           id: l.id,
+          type: l.type || 'sell',
           productId: l.productId,
           unitId: l.unitId,
           qty: String(l.qty),
@@ -53,6 +61,7 @@ export default function OrderFormPage() {
     } else if (data.orderDraft && !sp.get('khach')) {
       setCustomerId(data.orderDraft.customerId || '')
       setDate(data.orderDraft.date || todayISO())
+      setVatEnabled(!!data.orderDraft.vatEnabled)
       setLines(data.orderDraft.lines?.length ? data.orderDraft.lines : [newLine()])
       if (data.orderDraft.customerId) toast.info('Đã khôi phục đơn đang nhập dở')
     } else if (sp.get('khach')) {
@@ -66,14 +75,26 @@ export default function OrderFormPage() {
     if (editing || !hydrated.current) return
     const t = setTimeout(() => {
       if (customerId || lines.some((l) => l.productId)) {
-        setOrderDraft({ customerId, date, lines })
+        setOrderDraft({ customerId, date, lines, vatEnabled })
       }
     }, 400)
     return () => clearTimeout(t)
-  }, [customerId, date, lines, editing, setOrderDraft])
+  }, [customerId, date, lines, vatEnabled, editing, setOrderDraft])
 
   const lineAmount = (l) => Math.round((Number(l.qty) || 0) * (Number(l.price) || 0))
-  const total = lines.reduce((s, l) => s + lineAmount(l), 0)
+  const signedAmount = (l) => (l.type === 'return' ? -lineAmount(l) : lineAmount(l))
+  const goodsTotal = lines.reduce((s, l) => s + signedAmount(l), 0)
+  const sellTotal = lines.reduce(
+    (s, l) => s + (l.type === 'return' ? 0 : lineAmount(l)),
+    0,
+  )
+  const totalReturn = lines.reduce(
+    (s, l) => s + (l.type === 'return' ? lineAmount(l) : 0),
+    0,
+  )
+  const vatRate = data.settings.vatRate ?? 8
+  const vatAmount = vatEnabled ? Math.round(sellTotal * (vatRate / 100)) : 0
+  const total = goodsTotal + vatAmount
 
   const updateLine = (lid, patch) =>
     setLines((ls) => ls.map((l) => (l.id === lid ? { ...l, ...patch } : l)))
@@ -89,6 +110,11 @@ export default function OrderFormPage() {
     }
     updateLine(lid, patch)
   }
+
+  const boughtMap = useMemo(
+    () => (customerId ? purchasedReturned(customerId, data) : new Map()),
+    [customerId, data],
+  )
 
   const pickUnit = (lid, unitId) => {
     const l = lines.find((x) => x.id === lid)
@@ -115,6 +141,8 @@ export default function OrderFormPage() {
         customerId,
         date,
         lines: valid.map((l) => ({ ...l, qty: Number(l.qty), price: Number(l.price) || 0 })),
+        vat: vatEnabled,
+        vatRate,
       },
       editing?.id,
     )
@@ -155,16 +183,46 @@ export default function OrderFormPage() {
       {/* dòng hàng */}
       <div className="space-y-3">
         {lines.map((l, idx) => {
+          const isReturn = l.type === 'return'
           const bookPrice =
             l.productId && l.unitId ? data.getPrice(customerId, l.productId, l.unitId) : null
           const priceDiffers =
             l.productId && l.unitId && l.price !== '' && Number(l.price) !== bookPrice
+          // cảnh báo trả vượt đã mua (không chặn)
+          const pr = l.productId && l.unitId ? boughtMap.get(`${l.productId}|${l.unitId}`) : null
+          const overReturn =
+            isReturn && pr && Number(l.qty) > 0 && Number(l.qty) > pr.bought - pr.returned
           return (
-            <Card key={l.id} className="p-4">
-              <div className="mb-2.5 flex items-center justify-between">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-50 text-[12px] font-bold text-indigo-600">
-                  {idx + 1}
-                </span>
+            <Card key={l.id} className={`p-4 ${isReturn ? 'border-amber-200 bg-amber-50/40' : ''}`}>
+              <div className="mb-2.5 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`flex h-6 w-6 items-center justify-center rounded-full text-[12px] font-bold ${isReturn ? 'bg-amber-100 text-amber-600' : 'bg-indigo-50 text-indigo-600'
+                      }`}
+                  >
+                    {idx + 1}
+                  </span>
+                  {/* toggle Bán / Trả — gộp hàng trả chung phiếu */}
+                  <div className="flex rounded-xl bg-slate-100 p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => updateLine(l.id, { type: 'sell' })}
+                      className={`h-7 rounded-[10px] px-3 text-[12px] font-bold transition-all ${!isReturn ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-400'
+                        }`}
+                    >
+                      Bán
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => updateLine(l.id, { type: 'return' })}
+                      className={`flex h-7 items-center gap-1 rounded-[10px] px-3 text-[12px] font-bold transition-all ${isReturn ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-400'
+                        }`}
+                    >
+                      <Undo2 size={12} />
+                      Trả
+                    </button>
+                  </div>
+                </div>
                 {lines.length > 1 && (
                   <button
                     onClick={() => setLines((ls) => ls.filter((x) => x.id !== l.id))}
@@ -175,16 +233,15 @@ export default function OrderFormPage() {
                 )}
               </div>
 
-              {/* sản phẩm */}
-              <PickerButton
-                onClick={() => customerId ? setProdPickerFor(l.id) : toast.error('Chọn khách trước')}
-                placeholder="Chọn sản phẩm..."
-                icon={Package}
-              >
-                {l.productId ? productName(data, l.productId) : null}
-              </PickerButton>
+              {/* sản phẩm — nhập tự do + gợi ý + tạo nhanh */}
+              <ProductCombo
+                value={l.productId}
+                tone={isReturn ? 'amber' : 'indigo'}
+                placeholder={isReturn ? 'Tên hàng trả...' : 'Tên sản phẩm...'}
+                onPick={(p) => pickProduct(l.id, p)}
+              />
 
-              {/* quy cách — chips chọn nhanh */}
+              {/* quy cách — chips chọn nhanh + thêm mới tại chỗ */}
               <div className="no-scrollbar mt-2.5 flex gap-1.5 overflow-x-auto">
                 {data.units.map((u) => (
                   <button
@@ -192,14 +249,59 @@ export default function OrderFormPage() {
                     type="button"
                     onClick={() => pickUnit(l.id, u.id)}
                     className={`h-9 shrink-0 rounded-xl px-3.5 text-[13px] font-semibold transition-all ${l.unitId === u.id
-                      ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
+                      ? isReturn
+                        ? 'bg-amber-500 text-white shadow-sm shadow-amber-200'
+                        : 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
                       : 'bg-slate-100 text-slate-500 active:bg-slate-200'
                       }`}
                   >
                     {u.name}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddingUnitFor(addingUnitFor === l.id ? null : l.id)
+                    setNewUnitName('')
+                  }}
+                  className="flex h-9 shrink-0 items-center gap-1 rounded-xl border border-dashed border-slate-300 px-3 text-[13px] font-semibold text-slate-400 active:bg-slate-50"
+                >
+                  <Plus size={13} /> Quy cách
+                </button>
               </div>
+              {addingUnitFor === l.id && (
+                <div className="mt-2 flex gap-2">
+                  <Input
+                    autoFocus
+                    value={newUnitName}
+                    onChange={(e) => setNewUnitName(e.target.value)}
+                    placeholder="Tên quy cách mới (VD: Bao, Lốc)..."
+                    className="h-9 flex-1 text-[13px]"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newUnitName.trim()) {
+                        const u = data.addUnit(newUnitName.trim())
+                        pickUnit(l.id, u.id)
+                        setAddingUnitFor(null)
+                        toast.success(`Đã thêm quy cách "${u.name}"`)
+                      }
+                      if (e.key === 'Escape') setAddingUnitFor(null)
+                    }}
+                  />
+                  <Button
+                    size="sm"
+                    className="h-9"
+                    onClick={() => {
+                      if (!newUnitName.trim()) return
+                      const u = data.addUnit(newUnitName.trim())
+                      pickUnit(l.id, u.id)
+                      setAddingUnitFor(null)
+                      toast.success(`Đã thêm quy cách "${u.name}"`)
+                    }}
+                  >
+                    Thêm
+                  </Button>
+                </div>
+              )}
 
               {/* SL + giá + thành tiền */}
               <div className="mt-2.5 grid grid-cols-[1fr_1fr_auto] items-end gap-2.5">
@@ -223,7 +325,11 @@ export default function OrderFormPage() {
                 </Field>
                 <div className="pb-1 text-right">
                   <p className="text-[10.5px] font-semibold uppercase text-slate-400">Thành tiền</p>
-                  <p className="text-[16px] font-bold tabular-nums text-slate-800">
+                  <p
+                    className={`text-[16px] font-bold tabular-nums ${isReturn ? 'text-amber-600' : 'text-slate-800'
+                      }`}
+                  >
+                    {isReturn && lineAmount(l) > 0 ? '-' : ''}
                     {fmtMoney(lineAmount(l))}
                   </p>
                 </div>
@@ -256,19 +362,60 @@ export default function OrderFormPage() {
                   Chưa có giá trong bảng giá — nhập tay rồi có thể lưu lại
                 </p>
               )}
+              {overReturn && (
+                <p className="mt-2 flex items-center gap-1.5 text-[11.5px] font-semibold text-amber-600">
+                  <AlertTriangle size={13} />
+                  Trả vượt đã mua (mua {fmtQty(pr.bought)}, đã trả {fmtQty(pr.returned)}) — vẫn lưu được
+                </p>
+              )}
             </Card>
           )
         })}
       </div>
 
-      <Button
-        variant="soft"
-        icon={Plus}
-        className="w-full"
-        onClick={() => setLines((ls) => [...ls, newLine()])}
-      >
-        Thêm dòng
-      </Button>
+      <div className="grid grid-cols-2 gap-2.5">
+        <Button
+          variant="soft"
+          icon={Plus}
+          onClick={() => setLines((ls) => [...ls, newLine('sell')])}
+        >
+          Thêm hàng bán
+        </Button>
+        <Button
+          variant="soft"
+          icon={Undo2}
+          className="bg-amber-50! text-amber-700!"
+          onClick={() => setLines((ls) => [...ls, newLine('return')])}
+        >
+          Thêm hàng trả
+        </Button>
+      </div>
+
+      {/* VAT hóa đơn — cộng vào công nợ khách */}
+      <Card className="p-4">
+        <Switch
+          checked={vatEnabled}
+          onChange={setVatEnabled}
+          label={`Xuất hóa đơn — thu tiền VAT ${vatRate}%`}
+        />
+        {vatEnabled && (
+          <div className="mt-2.5 space-y-1 rounded-xl bg-indigo-50/60 px-3.5 py-2.5 text-[13px] font-semibold">
+            <div className="flex justify-between text-slate-500">
+              <span>Tổng hàng bán</span>
+              <span className="tabular-nums">{fmtMoney(sellTotal)} đ</span>
+            </div>
+            <div className="flex justify-between text-indigo-700">
+              <span className="flex items-center gap-1.5">
+                <BadgePercent size={14} /> Tiền VAT hóa đơn ({vatRate}%)
+              </span>
+              <span className="tabular-nums">+{fmtMoney(vatAmount)} đ</span>
+            </div>
+            <p className="text-[11px] font-medium text-slate-400">
+              Tiền VAT cộng vào công nợ — khách thanh toán sau
+            </p>
+          </div>
+        )}
+      </Card>
 
       {/* thanh tổng cố định */}
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-100 bg-white/95 px-4 pb-[max(16px,env(safe-area-inset-bottom))] pt-3 backdrop-blur lg:left-64">
@@ -280,6 +427,14 @@ export default function OrderFormPage() {
             <p className="text-[22px] font-extrabold tabular-nums leading-tight text-indigo-700">
               {fmtMoney(total)} <span className="text-sm font-semibold text-indigo-300">đ</span>
             </p>
+            <div className="flex gap-2 text-[11px] font-semibold">
+              {totalReturn > 0 && (
+                <span className="text-amber-600">trừ trả {fmtMoney(totalReturn)}đ</span>
+              )}
+              {vatAmount > 0 && (
+                <span className="text-indigo-500">+VAT {fmtMoney(vatAmount)}đ</span>
+              )}
+            </div>
           </div>
           <Button size="lg" icon={Save} className="min-w-[140px]" onClick={save}>
             {editing ? 'Lưu sửa' : 'Lưu đơn'}
@@ -308,25 +463,6 @@ export default function OrderFormPage() {
         )}
       />
 
-      {/* picker sản phẩm */}
-      <PickerModal
-        open={!!prodPickerFor}
-        onClose={() => setProdPickerFor(null)}
-        title="Chọn sản phẩm"
-        items={data.products}
-        getKey={(p) => p.id}
-        filterText={(p) => p.name}
-        searchPlaceholder="Tìm sản phẩm..."
-        onPick={(p) => pickProduct(prodPickerFor, p)}
-        renderItem={(p) => (
-          <>
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-50 text-indigo-500">
-              <Package size={17} />
-            </div>
-            <p className="flex-1 text-[14.5px] font-semibold text-slate-800">{p.name}</p>
-          </>
-        )}
-      />
     </div>
   )
 }

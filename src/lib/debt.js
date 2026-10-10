@@ -210,7 +210,8 @@ export function purchasedReturned(customerId, data) {
     for (const l of o.lines) {
       const k = key(l)
       const cur = map.get(k) || { bought: 0, returned: 0 }
-      cur.bought += Number(l.qty)
+      if (l.type === 'return') cur.returned += Number(l.qty)
+      else cur.bought += Number(l.qty)
       map.set(k, cur)
     }
   }
@@ -250,16 +251,32 @@ export function diffOrders(oldOrder, next, lookups) {
   if (oldOrder.date !== next.date) {
     changes.push(`Đổi ngày: ${fmtDate(oldOrder.date)} → ${fmtDate(next.date)}`)
   }
+  const oldVat = oldOrder.vat?.amount || 0
+  const newVat = next.vat?.amount || 0
+  if (oldVat !== newVat) {
+    changes.push(
+      newVat === 0
+        ? `Bỏ tiền VAT (−${fmtMoney(oldVat)})`
+        : oldVat === 0
+          ? `Thêm tiền VAT ${next.vat.rate}%: +${fmtMoney(newVat)}`
+          : `Tiền VAT: ${fmtMoney(oldVat)} → ${fmtMoney(newVat)}`,
+    )
+  }
   const oldById = new Map(oldOrder.lines.map((l) => [l.id, l]))
   const newById = new Map(next.lines.map((l) => [l.id, l]))
   for (const l of next.lines) {
     const name = `${productName(l.productId)} / ${unitName(l.unitId)}`
     const prev = oldById.get(l.id)
     if (!prev) {
-      changes.push(`Thêm dòng ${name}: ${fmtQty(l.qty)} x ${fmtMoney(l.price)}`)
+      changes.push(
+        `${l.type === 'return' ? 'Thêm dòng trả' : 'Thêm dòng'} ${name}: ${fmtQty(l.qty)} x ${fmtMoney(l.price)}`,
+      )
       continue
     }
     const parts = []
+    if ((prev.type || 'sell') !== (l.type || 'sell')) {
+      parts.push(l.type === 'return' ? 'đổi thành dòng trả' : 'đổi thành dòng bán')
+    }
     if (prev.productId !== l.productId || prev.unitId !== l.unitId) {
       parts.push(`hàng ${productName(prev.productId)}/${unitName(prev.unitId)} → ${name}`)
     }
@@ -270,7 +287,7 @@ export function diffOrders(oldOrder, next, lookups) {
   for (const l of oldOrder.lines) {
     if (!newById.has(l.id)) {
       changes.push(
-        `Xóa dòng ${productName(l.productId)}/${unitName(l.unitId)}: ${fmtQty(l.qty)} x ${fmtMoney(l.price)}`,
+        `${l.type === 'return' ? 'Xóa dòng trả' : 'Xóa dòng'} ${productName(l.productId)}/${unitName(l.unitId)}: ${fmtQty(l.qty)} x ${fmtMoney(l.price)}`,
       )
     }
   }

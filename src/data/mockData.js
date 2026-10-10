@@ -101,7 +101,7 @@ export function buildSeed() {
     ['c10', 13, [['p1', 'u1', 200, 450], ['p2', 'u2', 100, 420]]],
     ['c10', 6, [['p3', 'u5', 10, 22000], ['p5', 'u4', 20, 10000]]],
     ['c10', 2, [['p4', 'u3', 24, 7000]]],
-    ['c10', 0, [['p1', 'u1', 150, 450]]],
+    ['c10', 0, [['p1', 'u1', 150, 450], ['p4', 'u3', 2, 7000, 'return']]], // phiếu có hàng trả gộp chung
     ['c11', 8, [['p6', 'u2', 2, 15000]]],
     ['c12', 4, [['p9', 'u3', 1, 47000], ['p4', 'u3', 2, 9800]]],
     ['c13', 6, [['p3', 'u5', 4, 25500]]],
@@ -114,8 +114,9 @@ export function buildSeed() {
   const orders = orderSpecs.map(([custId, ago, lines]) => {
     seq += 1
     orderNo += 1
-    const lineObjs = lines.map(([productId, unitId, qty, price], i) => ({
+    const lineObjs = lines.map(([productId, unitId, qty, price, type], i) => ({
       id: `o${orderNo}l${i + 1}`,
+      type: type === 'return' ? 'return' : 'sell',
       productId,
       unitId,
       qty,
@@ -130,7 +131,7 @@ export function buildSeed() {
       seq,
       createdAt: ts(ago, 9 + (orderNo % 8)),
       lines: lineObjs,
-      total: lineObjs.reduce((s, l) => s + l.amount, 0),
+      total: lineObjs.reduce((s, l) => s + (l.type === 'return' ? -l.amount : l.amount), 0),
       editHistory: [],
       lastEditAt: null,
       deletedAt: null,
@@ -168,6 +169,13 @@ export function buildSeed() {
     ]
     o13.lastEditAt = ts(2, 11, 5)
     o13.total = 110500
+  }
+
+  // Đơn xuất hóa đơn VAT 8% — tiền VAT cộng vào công nợ
+  const o25 = orders.find((o) => o.code === 'HĐ-0025') // Minh Phát c10
+  if (o25) {
+    o25.vat = { rate: 8, amount: 10560 }
+    o25.total += 10560
   }
 
   // ===== Hàng trả =====

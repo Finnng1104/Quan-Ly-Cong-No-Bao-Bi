@@ -5,7 +5,6 @@ import {
   Plus,
   Trash2,
   User,
-  Package,
   AlertTriangle,
   Save,
 } from 'lucide-react'
@@ -23,6 +22,7 @@ import {
   Confirm,
 } from '../components/ui'
 import { PickerModal, PickerButton, Avatar } from '../components/pickers'
+import ProductCombo from '../components/ProductCombo'
 import { useToast } from '../components/Toast'
 
 const newLine = () => ({ id: uid('l'), productId: '', unitId: '', qty: '', price: '' })
@@ -35,7 +35,8 @@ function ReturnForm({ open, onClose, presetCustomer }) {
   const [reason, setReason] = useState('')
   const [lines, setLines] = useState([newLine()])
   const [custPicker, setCustPicker] = useState(false)
-  const [prodPickerFor, setProdPickerFor] = useState(null)
+  const [addingUnitFor, setAddingUnitFor] = useState(null)
+  const [newUnitName, setNewUnitName] = useState('')
 
   const boughtMap = useMemo(
     () => (customerId ? purchasedReturned(customerId, data) : new Map()),
@@ -113,13 +114,12 @@ function ReturnForm({ open, onClose, presetCustomer }) {
           <div key={l.id} className="rounded-2xl border border-slate-100 bg-slate-50/50 p-3.5">
             <div className="flex items-center gap-2">
               <div className="flex-1">
-                <PickerButton
-                  onClick={() => (customerId ? setProdPickerFor(l.id) : toast.error('Chọn khách trước'))}
-                  placeholder="Chọn sản phẩm..."
-                  icon={Package}
-                >
-                  {l.productId ? productName(data, l.productId) : null}
-                </PickerButton>
+                <ProductCombo
+                  tone="amber"
+                  value={l.productId}
+                  placeholder="Tên hàng trả..."
+                  onPick={(p) => (customerId ? pickProduct(l.id, p) : toast.error('Chọn khách trước'))}
+                />
               </div>
               {lines.length > 1 && (
                 <button
@@ -142,7 +142,51 @@ function ReturnForm({ open, onClose, presetCustomer }) {
                   {u.name}
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={() => {
+                  setAddingUnitFor(addingUnitFor === l.id ? null : l.id)
+                  setNewUnitName('')
+                }}
+                className="flex h-8 shrink-0 items-center gap-1 rounded-lg border border-dashed border-slate-300 px-3 text-[12.5px] font-semibold text-slate-400"
+              >
+                <Plus size={12} /> Quy cách
+              </button>
             </div>
+            {addingUnitFor === l.id && (
+              <div className="mt-2 flex gap-2">
+                <Input
+                  autoFocus
+                  value={newUnitName}
+                  onChange={(e) => setNewUnitName(e.target.value)}
+                  placeholder="Tên quy cách mới..."
+                  className="h-9 flex-1 text-[13px]"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newUnitName.trim()) {
+                      const u = data.addUnit(newUnitName.trim())
+                      pickUnit(l.id, u.id)
+                      setAddingUnitFor(null)
+                      toast.success(`Đã thêm quy cách "${u.name}"`)
+                    }
+                    if (e.key === 'Escape') setAddingUnitFor(null)
+                  }}
+                />
+                <Button
+                  size="sm"
+                  variant="amber"
+                  className="h-9"
+                  onClick={() => {
+                    if (!newUnitName.trim()) return
+                    const u = data.addUnit(newUnitName.trim())
+                    pickUnit(l.id, u.id)
+                    setAddingUnitFor(null)
+                    toast.success(`Đã thêm quy cách "${u.name}"`)
+                  }}
+                >
+                  Thêm
+                </Button>
+              </div>
+            )}
             <div className="mt-2 grid grid-cols-2 gap-2">
               <Input
                 inputMode="decimal"
@@ -204,23 +248,6 @@ function ReturnForm({ open, onClose, presetCustomer }) {
           <>
             <Avatar name={c.name} />
             <p className="flex-1 text-[14.5px] font-semibold text-slate-800">{c.name}</p>
-          </>
-        )}
-      />
-      <PickerModal
-        open={!!prodPickerFor}
-        onClose={() => setProdPickerFor(null)}
-        title="Chọn sản phẩm"
-        items={data.products}
-        getKey={(p) => p.id}
-        filterText={(p) => p.name}
-        onPick={(p) => pickProduct(prodPickerFor, p)}
-        renderItem={(p) => (
-          <>
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-50 text-amber-500">
-              <Package size={17} />
-            </div>
-            <p className="flex-1 text-[14.5px] font-semibold text-slate-800">{p.name}</p>
           </>
         )}
       />

@@ -103,6 +103,10 @@ export default function OrdersPage() {
                         <History size={10} /> Đã điều chỉnh
                       </Badge>
                     )}
+                    {o.lines.some((l) => l.type === 'return') && (
+                      <Badge tone="amber">có hàng trả</Badge>
+                    )}
+                    {o.vat?.amount > 0 && <Badge tone="cyan">VAT</Badge>}
                   </div>
                   <p className="truncate text-[11.5px] text-slate-400">
                     {o.code} · {fmtDate(o.date)} ·{' '}

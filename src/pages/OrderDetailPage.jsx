@@ -80,6 +80,7 @@ export default function OrderDetailPage() {
                 <History size={10} /> Đã điều chỉnh
               </Badge>
             )}
+            {order.vat?.amount > 0 && <Badge tone="cyan">VAT {order.vat.rate}%</Badge>}
             {deleted && <Badge tone="rose">Đã xóa</Badge>}
           </div>
           <Link to={`/khach/${customer.id}`} className="text-[12.5px] font-semibold text-indigo-600">

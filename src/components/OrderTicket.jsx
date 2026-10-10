@@ -13,6 +13,10 @@ const OrderTicket = forwardRef(function OrderTicket(
 ) {
   const oldDebt = showDebt ? balanceBeforeOrder(customer.id, data, order) : 0
   const newDebt = oldDebt + order.total
+  const returnTotal = order.lines
+    .filter((l) => l.type === 'return')
+    .reduce((s, l) => s + l.amount, 0)
+  const linesTotal = order.total - (order.vat?.amount || 0)
 
   return (
     <div ref={ref} className="ticket-paper mx-auto w-full max-w-[148mm] p-5 text-[13px] leading-snug">
@@ -60,28 +64,56 @@ const OrderTicket = forwardRef(function OrderTicket(
           </tr>
         </thead>
         <tbody>
-          {order.lines.map((l) => (
-            <tr key={l.id} className="border-b border-dashed border-slate-200">
-              <td className="py-1.5 pr-1 text-right tabular-nums">{fmtQty(l.qty)}</td>
-              <td className="py-1.5 px-1">{data.units.find((u) => u.id === l.unitId)?.name || ''}</td>
-              <td className="py-1.5 px-1 font-medium">
-                {data.products.find((p) => p.id === l.productId)?.name || ''}
-              </td>
-              <td className="py-1.5 px-1 text-right tabular-nums">{fmtMoney(l.price)}</td>
-              <td className="py-1.5 pl-1 text-right font-semibold tabular-nums">
-                {fmtMoney(l.amount)}
-              </td>
-            </tr>
-          ))}
+          {order.lines.map((l) => {
+            const isRet = l.type === 'return'
+            return (
+              <tr key={l.id} className="border-b border-dashed border-slate-200">
+                <td className="py-1.5 pr-1 text-right tabular-nums">{fmtQty(l.qty)}</td>
+                <td className="py-1.5 px-1">{data.units.find((u) => u.id === l.unitId)?.name || ''}</td>
+                <td className="py-1.5 px-1 font-medium">
+                  {isRet && <span className="mr-1 text-[10px] font-bold uppercase text-amber-600">[Trả]</span>}
+                  {data.products.find((p) => p.id === l.productId)?.name || ''}
+                </td>
+                <td className="py-1.5 px-1 text-right tabular-nums">{fmtMoney(l.price)}</td>
+                <td className={`py-1.5 pl-1 text-right font-semibold tabular-nums ${isRet ? 'text-amber-700' : ''}`}>
+                  {isRet ? `-${fmtMoney(l.amount)}` : fmtMoney(l.amount)}
+                </td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
 
       {/* tổng kết */}
       <div className="mt-3 space-y-1 border-t-2 border-slate-700 pt-2 text-[13.5px]">
+        {returnTotal > 0 && (
+          <>
+            <div className="flex justify-between text-slate-500">
+              <span>Tổng hàng bán</span>
+              <span className="tabular-nums">{fmtMoney(linesTotal + returnTotal)} đ</span>
+            </div>
+            <div className="flex justify-between text-amber-700">
+              <span>Hàng trả</span>
+              <span className="tabular-nums">-{fmtMoney(returnTotal)} đ</span>
+            </div>
+          </>
+        )}
         <div className="flex justify-between">
           <span className="font-semibold">TỔNG ĐƠN HÀNG</span>
-          <b className="tabular-nums">{fmtMoney(order.total)} đ</b>
+          <b className="tabular-nums">{fmtMoney(linesTotal)} đ</b>
         </div>
+        {order.vat?.amount > 0 && (
+          <>
+            <div className="flex justify-between text-indigo-700">
+              <span>Tiền VAT hóa đơn ({order.vat.rate}%)</span>
+              <span className="tabular-nums">+{fmtMoney(order.vat.amount)} đ</span>
+            </div>
+            <div className="flex justify-between text-[15px]">
+              <span className="font-bold">TỔNG CỘNG</span>
+              <b className="tabular-nums">{fmtMoney(order.total)} đ</b>
+            </div>
+          </>
+        )}
         {showDebt && (
           <>
             <div className="flex justify-between text-slate-600">
@@ -94,6 +126,23 @@ const OrderTicket = forwardRef(function OrderTicket(
             </div>
           </>
         )}
+      </div>
+
+      {/* chỗ ghi hàng trả tay + chữ ký nhận hàng */}
+      <div className="mt-5 grid grid-cols-2 gap-6">
+        <div>
+          <p className="text-[12px] font-bold text-slate-700">Hàng trả:</p>
+          <div className="mt-2 space-y-5">
+            <div className="border-b border-dotted border-slate-300" />
+            <div className="border-b border-dotted border-slate-300" />
+            <div className="border-b border-dotted border-slate-300" />
+          </div>
+        </div>
+        <div className="text-center">
+          <p className="text-[12px] font-bold text-slate-700">Khách hàng ký nhận</p>
+          <p className="text-[10.5px] italic text-slate-400">(Ký, ghi rõ họ tên)</p>
+          <div className="mx-6 mt-12 border-b border-slate-300" />
+        </div>
       </div>
 
       <p className="mt-4 text-center text-[11.5px] italic text-slate-400">

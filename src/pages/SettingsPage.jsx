@@ -6,6 +6,7 @@ import {
   Eye,
   RefreshCcw,
   LogOut,
+  Percent,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { Card, Button, Field, Input, Switch, Confirm } from '../components/ui'
@@ -102,6 +103,24 @@ export default function SettingsPage() {
         />
         <p className="mt-2 text-[12px] text-slate-400">
           Tắt để phiếu gửi khách chỉ có Tổng đơn hàng.
+        </p>
+        <div className="mt-4 flex items-center gap-3 border-t border-slate-100 pt-3.5">
+          <Percent size={15} className="text-slate-400" />
+          <span className="flex-1 text-[14px] font-medium text-slate-700">
+            Thuế suất VAT hóa đơn
+          </span>
+          <div className="flex items-center gap-1.5">
+            <Input
+              inputMode="numeric"
+              value={data.settings.vatRate ?? 8}
+              onChange={(e) => data.setVatRate(e.target.value.replace(/[^0-9.]/g, ''))}
+              className="h-9 w-20 text-center font-bold"
+            />
+            <span className="text-[13px] font-semibold text-slate-400">%</span>
+          </div>
+        </div>
+        <p className="mt-1.5 text-[12px] text-slate-400">
+          Áp dụng khi bật "Xuất hóa đơn VAT" trong đơn — tiền VAT cộng vào công nợ khách.
         </p>
       </Card>
 
