@@ -1,10 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { HandCoins, User, Save } from 'lucide-react'
 import { useStore, customerName } from '../store/useStore'
-import { balanceAt } from '../lib/debt'
+import { api } from '../api/httpApi'
+import { useAsync } from '../hooks/useAsync'
+import { useAction } from '../hooks/useAction'
 import { todayISO, fmtMoney, fmtDate } from '../lib/format'
 import { Card, Money, Badge, Empty, Button, Field, Input, Confirm } from '../components/ui'
+import { ErrorCard } from '../components/AsyncState'
 import { PickerModal, PickerButton, Avatar } from '../components/pickers'
 import { useToast } from '../components/Toast'
 
@@ -18,25 +21,30 @@ export default function PaymentsPage() {
   const [delId, setDelId] = useState(null)
   const data = useStore()
   const toast = useToast()
+  const run = useAction()
 
-  const debt = customerId ? balanceAt(customerId, data, todayISO()) : null
-
-  const payments = useMemo(
-    () =>
-      data.payments
-        .filter((p) => !p.deletedAt)
-        .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.seq - a.seq))
-        .slice(0, 60),
-    [data],
+  // Debt of the chosen customer today; refreshed after every saved payment.
+  const { data: customerInfo } = useAsync(
+    () => (customerId ? api.customers.get(customerId, todayISO()) : null),
+    [customerId, data.dataVersion],
   )
+  const debt = customerId && customerInfo?.id === customerId ? customerInfo.balance : null
+
+  const { data: paymentPage, error, reload } = useAsync(
+    () => api.payments.list({ limit: 60 }),
+    [data.dataVersion],
+  )
+  const payments = paymentPage?.items ?? []
 
   const save = () => {
     if (!customerId) return toast.error('Vui lòng chọn khách')
     if (!Number(amount) || Number(amount) <= 0) return toast.error('Nhập số tiền thu')
-    const rec = data.addPayment({ customerId, date, amount: Number(amount), note })
-    toast.success(`Đã thu ${fmtMoney(rec.amount)} đ — trừ vào công nợ chung`)
-    setAmount('')
-    setNote('')
+    return run(async () => {
+      const rec = await data.addPayment({ customerId, date, amount: Number(amount), note })
+      toast.success(`Đã thu ${fmtMoney(rec.amount)} đ — trừ vào công nợ chung`)
+      setAmount('')
+      setNote('')
+    })
   }
 
   return (
@@ -112,7 +120,9 @@ export default function PaymentsPage() {
         <Badge tone="emerald">{payments.length} phiếu</Badge>
       </div>
 
-      {payments.length === 0 ? (
+      {error && !paymentPage ? (
+        <ErrorCard error={error} onRetry={reload} />
+      ) : payments.length === 0 ? (
         <Card>
           <Empty icon={HandCoins} title="Chưa có phiếu thu nào" />
         </Card>
@@ -153,7 +163,7 @@ export default function PaymentsPage() {
         items={data.customers}
         getKey={(c) => c.id}
         filterText={(c) => `${c.name} ${c.phone}`}
-        onPick={setCustomerId}
+        onPick={(c) => setCustomerId(c.id)}
         renderItem={(c) => (
           <>
             <Avatar name={c.name} />
@@ -168,10 +178,12 @@ export default function PaymentsPage() {
       <Confirm
         open={!!delId}
         onClose={() => setDelId(null)}
-        onConfirm={() => {
-          data.removePayment(delId)
-          toast.success('Đã xóa phiếu thu')
-        }}
+        onConfirm={() =>
+          run(async () => {
+            await data.removePayment(delId)
+            toast.success('Đã xóa phiếu thu')
+          })
+        }
         title="Xóa phiếu thu?"
         message="Phiếu thu sẽ bị xóa và cộng lại vào công nợ của khách."
       />

@@ -4,69 +4,56 @@ import {
   Download,
   Store,
   Eye,
-  RefreshCcw,
   LogOut,
   Percent,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
-import { customerDebtRows } from '../lib/debt'
+import { api } from '../api/httpApi'
+import { useAction } from '../hooks/useAction'
 import { todayISO, toCsv, downloadText } from '../lib/format'
-import { Card, Button, Field, Input, Switch, Confirm } from '../components/ui'
+import { Card, Button, Field, Input, Switch } from '../components/ui'
 import { useToast } from '../components/Toast'
 
 export default function SettingsPage() {
   const data = useStore()
   const toast = useToast()
+  const run = useAction()
   const [oldPw, setOldPw] = useState('')
   const [newPw, setNewPw] = useState('')
   const [newPw2, setNewPw2] = useState('')
   const [shopName, setShopName] = useState(data.settings.shopName)
-  const [resetOpen, setResetOpen] = useState(false)
+  const [vatInput, setVatInput] = useState(String(data.settings.vatRate ?? 8))
 
   const changePw = () => {
     if (newPw.length < 4) return toast.error('Mật khẩu mới tối thiểu 4 ký tự')
     if (newPw !== newPw2) return toast.error('Nhập lại mật khẩu không khớp')
-    if (data.changePassword(oldPw, newPw)) {
+    return run(async () => {
+      await data.changePassword(oldPw, newPw)
       toast.success('Đã đổi mật khẩu')
       setOldPw('')
       setNewPw('')
       setNewPw2('')
-    } else {
-      toast.error('Mật khẩu hiện tại không đúng')
-    }
+    })
   }
 
-  const exportData = () => {
-    const blob = new Blob(
-      [
-        JSON.stringify(
-          {
-            exportedAt: new Date().toISOString(),
-            customers: data.customers,
-            products: data.products,
-            units: data.units,
-            priceBook: data.priceBook,
-            orders: data.orders,
-            returns: data.returns,
-            payments: data.payments,
-          },
-          null,
-          2,
-        ),
-      ],
-      { type: 'application/json' },
-    )
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = `congno-backup-${new Date().toISOString().slice(0, 10)}.json`
-    a.click()
-    toast.success('Đã xuất dữ liệu JSON')
+  // The VAT rate is saved when the field loses focus, not on every keystroke.
+  const saveVatRate = () => {
+    const rate = Number(vatInput)
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+      setVatInput(String(data.settings.vatRate ?? 8))
+      return toast.error('Thuế suất phải từ 0 đến 100%')
+    }
+    if (rate === data.settings.vatRate) return
+    return run(async () => {
+      await data.setVatRate(rate)
+      toast.success('Đã lưu thuế suất VAT')
+    })
   }
 
   // Xuất bảng công nợ cuối của khách hàng (CSV — mở bằng Excel)
-  const exportDebt = () => {
+  const exportDebt = () => run(async () => {
     const date = todayISO()
-    const rows = customerDebtRows(data, date)
+    const rows = await api.reports.customerDebts(date)
     const head = [
       'STT',
       'Khách hàng',
@@ -102,7 +89,7 @@ export default function SettingsPage() {
     ]
     downloadText(`cong-no-khach-${date}.csv`, toCsv([head, ...body, totals]), 'text/csv;charset=utf-8')
     toast.success(`Đã xuất công nợ ${rows.length} khách`)
-  }
+  })
 
   return (
     <div className="animate-fade-up space-y-4">
@@ -123,10 +110,12 @@ export default function SettingsPage() {
             />
             <Button
               variant="soft"
-              onClick={() => {
-                data.setShopName(shopName.trim() || 'Cửa hàng')
-                toast.success('Đã lưu tên cửa hàng')
-              }}
+              onClick={() =>
+                run(async () => {
+                  await data.setShopName(shopName.trim() || 'Cửa hàng')
+                  toast.success('Đã lưu tên cửa hàng')
+                })
+              }
             >
               Lưu
             </Button>
@@ -141,7 +130,7 @@ export default function SettingsPage() {
         </p>
         <Switch
           checked={data.settings.showDebtOnTicket}
-          onChange={data.setShowDebtOnTicket}
+          onChange={(value) => run(() => data.setShowDebtOnTicket(value))}
           label="Hiển thị nợ cũ / nợ mới trên phiếu"
         />
         <p className="mt-2 text-[12px] text-slate-400">
@@ -154,9 +143,13 @@ export default function SettingsPage() {
           </span>
           <div className="flex items-center gap-1.5">
             <Input
-              inputMode="numeric"
-              value={data.settings.vatRate ?? 8}
-              onChange={(e) => data.setVatRate(e.target.value.replace(/[^0-9.]/g, ''))}
+              inputMode="decimal"
+              value={vatInput}
+              onChange={(e) => setVatInput(e.target.value.replace(/[^0-9.]/g, ''))}
+              onBlur={saveVatRate}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.target.blur()
+              }}
               className="h-9 w-20 text-center font-bold"
             />
             <span className="text-[13px] font-semibold text-slate-400">%</span>
@@ -211,14 +204,8 @@ export default function SettingsPage() {
         <Button variant="outline" icon={Download} className="w-full" onClick={exportDebt}>
           Xuất công nợ khách (CSV — Excel)
         </Button>
-        <Button variant="outline" icon={Download} className="w-full" onClick={exportData}>
-          Xuất toàn bộ dữ liệu (JSON)
-        </Button>
-        <Button variant="outline" icon={RefreshCcw} className="w-full" onClick={() => setResetOpen(true)}>
-          Nạp lại dữ liệu mẫu
-        </Button>
         <p className="text-[12px] text-slate-400">
-          Dữ liệu lưu ngay trên máy (localStorage) — tải lại trang không mất.
+          Dữ liệu được lưu trên máy chủ của cửa hàng và sao lưu tự động.
         </p>
       </Card>
 
@@ -226,22 +213,10 @@ export default function SettingsPage() {
         variant="danger"
         icon={LogOut}
         className="w-full"
-        onClick={() => data.logout()}
+        onClick={() => run(() => data.logout())}
       >
         Đăng xuất
       </Button>
-
-      <Confirm
-        open={resetOpen}
-        onClose={() => setResetOpen(false)}
-        onConfirm={() => {
-          data.resetData()
-          toast.success('Đã nạp lại dữ liệu mẫu')
-        }}
-        title="Nạp lại dữ liệu mẫu?"
-        message="Toàn bộ khách, đơn, thanh toán hiện tại sẽ bị thay bằng dữ liệu mẫu ban đầu."
-        confirmText="Nạp lại"
-      />
     </div>
   )
 }

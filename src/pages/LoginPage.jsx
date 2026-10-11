@@ -2,13 +2,15 @@ import { useState } from 'react'
 import { useNavigate, useLocation, Navigate } from 'react-router-dom'
 import { Wallet, User, Lock, Eye, EyeOff } from 'lucide-react'
 import { useStore } from '../store/useStore'
+import { messageOf } from '../api/client'
 import { Button, Input, Field } from '../components/ui'
 import { useToast } from '../components/Toast'
 
 export default function LoginPage() {
-  const [username, setUsername] = useState('chucuahang')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [showPw, setShowPw] = useState(false)
+  const [busy, setBusy] = useState(false)
   const login = useStore((s) => s.login)
   const authed = useStore((s) => s.authed)
   const navigate = useNavigate()
@@ -19,17 +21,21 @@ export default function LoginPage() {
     return <Navigate to={loc.state?.from || '/'} replace />
   }
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault()
     if (!username.trim()) {
       toast.error('Vui lòng nhập tên đăng nhập')
       return
     }
-    if (login(username.trim(), password)) {
+    setBusy(true)
+    try {
+      await login(username.trim(), password)
       toast.success('Đăng nhập thành công')
       navigate(loc.state?.from || '/', { replace: true })
-    } else {
-      toast.error('Sai mật khẩu')
+    } catch (error) {
+      toast.error(messageOf(error))
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -57,6 +63,7 @@ export default function LoginPage() {
                 placeholder="Tên đăng nhập"
                 className="pl-10"
                 autoComplete="username"
+                autoFocus
               />
             </div>
           </Field>
@@ -80,12 +87,9 @@ export default function LoginPage() {
               </button>
             </div>
           </Field>
-          <Button type="submit" size="lg" className="w-full">
-            Đăng nhập
+          <Button type="submit" size="lg" className="w-full" disabled={busy}>
+            {busy ? 'Đang đăng nhập...' : 'Đăng nhập'}
           </Button>
-          <p className="text-center text-xs text-slate-400">
-            Giai đoạn dùng thử — mật khẩu mặc định: <b>123456</b>
-          </p>
         </form>
       </div>
     </div>

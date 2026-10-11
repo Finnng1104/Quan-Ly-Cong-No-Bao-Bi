@@ -1,5 +1,8 @@
+import { useEffect } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { Loader2, WifiOff } from 'lucide-react'
 import { useStore } from './store/useStore'
+import { Button } from './components/ui'
 import AppLayout from './components/AppLayout'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
@@ -22,7 +25,45 @@ function RequireAuth({ children }) {
   return children
 }
 
+function FullPageMessage({ children }) {
+  return (
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-slate-50 p-6 text-center">
+      {children}
+    </div>
+  )
+}
+
 export default function App() {
+  const ready = useStore((s) => s.ready)
+  const bootError = useStore((s) => s.bootError)
+  const bootstrap = useStore((s) => s.bootstrap)
+
+  // Find out whether a session already exists before deciding what to show.
+  useEffect(() => {
+    bootstrap()
+  }, [bootstrap])
+
+  if (!ready) {
+    return (
+      <FullPageMessage>
+        <Loader2 size={28} className="animate-spin text-indigo-500" />
+        <p className="text-[14px] font-semibold text-slate-500">Đang tải...</p>
+      </FullPageMessage>
+    )
+  }
+
+  if (bootError) {
+    return (
+      <FullPageMessage>
+        <WifiOff size={30} className="text-rose-500" />
+        <p className="max-w-xs text-[14px] font-semibold text-slate-600">{bootError}</p>
+        <Button variant="outline" onClick={bootstrap}>
+          Thử lại
+        </Button>
+      </FullPageMessage>
+    )
+  }
+
   return (
     <Routes>
       <Route path="/dang-nhap" element={<LoginPage />} />

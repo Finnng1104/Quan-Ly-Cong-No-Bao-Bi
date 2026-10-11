@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Package, Plus, ChevronDown } from 'lucide-react'
 import { useStore, productName } from '../store/useStore'
+import { useAction } from '../hooks/useAction'
 import { normalize } from '../lib/format'
 import { Input } from './ui'
 
@@ -10,6 +11,7 @@ import { Input } from './ui'
  */
 export default function ProductCombo({ value, onPick, placeholder = 'Tên sản phẩm...', tone = 'indigo' }) {
   const data = useStore()
+  const run = useAction()
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const wrapRef = useRef(null)
@@ -27,12 +29,13 @@ export default function ProductCombo({ value, onPick, placeholder = 'Tên sản 
     setOpen(false)
   }
 
-  const create = () => {
-    const p = data.addProduct(q.trim())
-    onPick(p)
-    setQ('')
-    setOpen(false)
-  }
+  const create = () =>
+    run(async () => {
+      const p = await data.addProduct(q.trim())
+      onPick(p)
+      setQ('')
+      setOpen(false)
+    })
 
   const close = () => {
     // gõ đúng tên sản phẩm có sẵn thì tự chọn

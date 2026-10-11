@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -17,7 +17,10 @@ import {
   Trash2,
 } from 'lucide-react'
 import { useStore, productName, unitName } from '../store/useStore'
-import { balanceAt, fullLedger } from '../lib/debt'
+import { api } from '../api/httpApi'
+import { useAsync } from '../hooks/useAsync'
+import { useAction } from '../hooks/useAction'
+import { useCustomerPrices } from '../hooks/customerData'
 import { fmtMoney, fmtDate, todayISO } from '../lib/format'
 import {
   Card,
@@ -31,8 +34,11 @@ import {
   Input,
   Confirm,
 } from '../components/ui'
+import { ErrorCard } from '../components/AsyncState'
 import { CustomerForm } from './CustomersPage'
 import { useToast } from '../components/Toast'
+
+const LEDGER_PAGE_SIZE = 100
 
 const kindMeta = {
   opening: { label: 'Nợ đầu kỳ', tone: 'slate' },
@@ -50,13 +56,16 @@ function AdjustmentForm({ open, onClose, customer, data }) {
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
   const toast = useToast()
+  const run = useAction()
 
   const save = () => {
     const amt = Number(amount)
     if (!amt || amt <= 0) return toast.error('Nhập số tiền phát sinh')
-    data.addAdjustment({ customerId: customer.id, date, amount: amt * dir, note: note.trim() })
-    toast.success(dir > 0 ? `Đã cộng ${fmtMoney(amt)} đ vào công nợ` : `Đã trừ ${fmtMoney(amt)} đ khỏi công nợ`)
-    onClose()
+    return run(async () => {
+      await data.addAdjustment({ customerId: customer.id, date, amount: amt * dir, note: note.trim() })
+      toast.success(dir > 0 ? `Đã cộng ${fmtMoney(amt)} đ vào công nợ` : `Đã trừ ${fmtMoney(amt)} đ khỏi công nợ`)
+      onClose()
+    })
   }
 
   return (
@@ -129,21 +138,30 @@ export default function CustomerDetailPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [adjustOpen, setAdjustOpen] = useState(false)
   const [delAdjust, setDelAdjust] = useState(null)
+  const [ledgerLimit, setLedgerLimit] = useState(LEDGER_PAGE_SIZE)
   const toast = useToast()
+  const run = useAction()
+  const dataVersion = data.dataVersion
 
-  const balance = useMemo(() => (customer ? balanceAt(id, data, date) : 0), [customer, id, data, date])
-  const ledger = useMemo(
-    () => (customer ? fullLedger(id, data, date).slice().reverse() : []),
-    [customer, id, data, date],
+  // The server computes the balance and the running totals; only the newest rows are fetched.
+  const {
+    data: ledgerPage,
+    error: ledgerError,
+    reload: reloadLedger,
+  } = useAsync(
+    () => api.customers.ledger(id, { until: date, limit: ledgerLimit, offset: 0 }),
+    [id, date, ledgerLimit, dataVersion],
   )
-  const orders = useMemo(
-    () =>
-      data.orders
-        .filter((o) => o.customerId === id && !o.deletedAt)
-        .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.seq - a.seq)),
-    [data, id],
+  const { data: orderPage } = useAsync(
+    () => api.orders.list({ customerId: id, limit: 200 }),
+    [id, dataVersion],
   )
-  const prices = useMemo(() => data.priceBook.filter((p) => p.customerId === id), [data, id])
+  const { prices } = useCustomerPrices(id)
+
+  const balance = ledgerPage?.balance ?? 0
+  const ledger = ledgerPage?.items ?? []
+  const orders = orderPage?.items ?? []
+  const orderCount = orderPage?.total ?? 0
 
   if (!customer) {
     return (
@@ -262,15 +280,20 @@ export default function CustomerDetailPage() {
         onChange={setTab}
         tabs={[
           { key: 'ledger', label: 'Sổ công nợ' },
-          { key: 'orders', label: `Đơn hàng (${orders.length})` },
+          { key: 'orders', label: `Đơn hàng (${orderCount})` },
           { key: 'prices', label: `Bảng giá (${prices.length})` },
         ]}
       />
 
       {/* ===== Sổ công nợ ===== */}
-      {tab === 'ledger' && (
+      {tab === 'ledger' && ledgerError && !ledgerPage && (
+        <ErrorCard error={ledgerError} onRetry={reloadLedger} />
+      )}
+      {tab === 'ledger' && (ledgerPage || !ledgerError) && (
         <Card className="divide-y divide-slate-50 overflow-hidden">
-          {ledger.length === 0 && <Empty title="Chưa có phát sinh" desc={`Đến ${fmtDate(date)} chưa có giao dịch nào`} />}
+          {ledgerPage && ledger.length === 0 && (
+            <Empty title="Chưa có phát sinh" desc={`Đến ${fmtDate(date)} chưa có giao dịch nào`} />
+          )}
           {ledger.map((r, i) => (
             <Link
               key={i}
@@ -286,12 +309,11 @@ export default function CustomerDetailPage() {
                 <div className="flex items-center gap-1.5">
                   <p className="truncate text-[13.5px] font-semibold text-slate-700">{r.desc}</p>
                   <Badge tone={kindMeta[r.kind].tone}>{kindMeta[r.kind].label}</Badge>
-                  {r.kind === 'order' &&
-                    data.orders.find((o) => o.id === r.refId)?.editHistory?.length > 0 && (
-                      <Badge tone="violet">
-                        <History size={10} /> Đã điều chỉnh
-                      </Badge>
-                    )}
+                  {r.edited && (
+                    <Badge tone="violet">
+                      <History size={10} /> Đã điều chỉnh
+                    </Badge>
+                  )}
                 </div>
               </div>
               <div className="text-right">
@@ -318,6 +340,11 @@ export default function CustomerDetailPage() {
           ))}
         </Card>
       )}
+      {tab === 'ledger' && ledgerPage && ledgerPage.total > ledger.length && (
+        <Button variant="outline" className="w-full" onClick={() => setLedgerLimit((n) => n + LEDGER_PAGE_SIZE)}>
+          Xem thêm ({ledgerPage.total - ledger.length} dòng cũ hơn)
+        </Button>
+      )}
 
       {/* ===== Đơn hàng ===== */}
       {tab === 'orders' && (
@@ -328,7 +355,7 @@ export default function CustomerDetailPage() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
                   <p className="text-[14px] font-bold text-slate-800">{o.code}</p>
-                  {o.editHistory?.length > 0 && (
+                  {o.editCount > 0 && (
                     <Badge tone="violet">
                       <History size={10} /> Đã điều chỉnh
                     </Badge>
@@ -383,10 +410,12 @@ export default function CustomerDetailPage() {
       <Confirm
         open={!!delAdjust}
         onClose={() => setDelAdjust(null)}
-        onConfirm={() => {
-          data.removeAdjustment(delAdjust)
-          toast.success('Đã xóa phát sinh')
-        }}
+        onConfirm={() =>
+          run(async () => {
+            await data.removeAdjustment(delAdjust)
+            toast.success('Đã xóa phát sinh')
+          })
+        }
         title="Xóa phát sinh?"
         message="Khoản phát sinh sẽ bị xóa và công nợ cập nhật lại."
       />

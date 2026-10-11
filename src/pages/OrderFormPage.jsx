@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -12,9 +12,13 @@ import {
   BadgePercent,
 } from 'lucide-react'
 import { useStore, customerName } from '../store/useStore'
-import { purchasedReturned } from '../lib/debt'
-import { todayISO, fmtMoney, fmtQty, uid } from '../lib/format'
+import { api } from '../api/httpApi'
+import { useAsync } from '../hooks/useAsync'
+import { useAction } from '../hooks/useAction'
+import { useCustomerPrices, usePurchasedReturned } from '../hooks/customerData'
+import { todayISO, fmtMoney, fmtQty, parseQty, uid } from '../lib/format'
 import { Card, Button, Field, Input, Switch, Textarea } from '../components/ui'
+import { ErrorCard, LoadingCard } from '../components/AsyncState'
 import { PickerModal, PickerButton, Avatar } from '../components/pickers'
 import ProductCombo from '../components/ProductCombo'
 import { useToast } from '../components/Toast'
@@ -27,9 +31,14 @@ export default function OrderFormPage() {
   const navigate = useNavigate()
   const data = useStore()
   const toast = useToast()
+  const run = useAction()
   const { saveOrder, setOrderDraft, clearOrderDraft, setPrice } = data
 
-  const editing = orderId ? data.orders.find((o) => o.id === orderId) : null
+  // Editing loads the order (with its current version) from the server first.
+  const { data: editing, error: editError, reload: reloadEditing } = useAsync(
+    () => (orderId ? api.orders.get(orderId) : null),
+    [orderId],
+  )
 
   const [customerId, setCustomerId] = useState('')
   const [date, setDate] = useState(todayISO())
@@ -42,10 +51,13 @@ export default function OrderFormPage() {
   const [addingUnitFor, setAddingUnitFor] = useState(null) // lineId đang thêm quy cách
   const [newUnitName, setNewUnitName] = useState('')
   const hydrated = useRef(false)
+  const { getPrice } = useCustomerPrices(customerId)
+  const boughtMap = usePurchasedReturned(customerId)
 
   // nạp đơn sửa hoặc nháp
   useEffect(() => {
     if (hydrated.current) return
+    if (orderId && !editing) return // wait for the order to arrive
     hydrated.current = true
     if (editing) {
       setCustomerId(editing.customerId)
@@ -79,7 +91,7 @@ export default function OrderFormPage() {
       setCustomerId(sp.get('khach'))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [editing])
 
   // lưu nháp (chỉ khi tạo mới)
   useEffect(() => {
@@ -92,7 +104,7 @@ export default function OrderFormPage() {
     return () => clearTimeout(t)
   }, [customerId, date, lines, vatEnabled, vatManual, note, fees, editing, setOrderDraft])
 
-  const lineAmount = (l) => Math.round((Number(l.qty) || 0) * (Number(l.price) || 0))
+  const lineAmount = (l) => Math.round(parseQty(l.qty) * (Number(l.price) || 0))
   const signedAmount = (l) => (l.type === 'return' ? -lineAmount(l) : lineAmount(l))
   const goodsTotal = lines.reduce((s, l) => s + signedAmount(l), 0)
   const sellTotal = lines.reduce(
@@ -118,55 +130,74 @@ export default function OrderFormPage() {
     // nếu đã chọn quy cách thì tự điền giá
     const patch = { productId: product.id }
     if (unitId) {
-      const p = data.getPrice(customerId, product.id, unitId)
+      const p = getPrice(product.id, unitId)
       if (p !== null) patch.price = String(p)
     }
     updateLine(lid, patch)
   }
-
-  const boughtMap = useMemo(
-    () => (customerId ? purchasedReturned(customerId, data) : new Map()),
-    [customerId, data],
-  )
 
   const pickUnit = (lid, unitId) => {
     const l = lines.find((x) => x.id === lid)
     const patch = { unitId }
     if (l?.productId) {
-      const p = data.getPrice(customerId, l.productId, unitId)
+      const p = getPrice(l.productId, unitId)
       if (p !== null) patch.price = String(p)
     }
     updateLine(lid, patch)
   }
+
+  const createUnitFor = (lineId) =>
+    run(async () => {
+      const name = newUnitName.trim()
+      if (!name) return
+      const unit = await data.addUnit(name)
+      pickUnit(lineId, unit.id)
+      setAddingUnitFor(null)
+      toast.success(`Đã thêm quy cách "${unit.name}"`)
+    })
 
   const save = () => {
     if (!customerId) {
       toast.error('Vui lòng chọn khách hàng')
       return
     }
-    const valid = lines.filter((l) => l.productId && l.unitId && Number(l.qty) > 0)
+    const valid = lines.filter((l) => l.productId && l.unitId && parseQty(l.qty) > 0)
     if (valid.length === 0) {
       toast.error('Đơn cần ít nhất 1 dòng hàng hợp lệ')
       return
     }
-    const saved = saveOrder(
-      {
-        customerId,
-        date,
-        lines: valid.map((l) => ({ ...l, qty: Number(l.qty), price: Number(l.price) || 0 })),
-        vat: vatEnabled,
-        vatRate,
-        vatAmount: vatManual !== '' ? Number(vatManual) || 0 : undefined,
-        fees: fees
-          .filter((f) => Number(f.amount) > 0)
-          .map((f) => ({ ...f, name: f.name.trim() || 'Chi phí', amount: Number(f.amount) })),
-        note: note.trim(),
-      },
-      editing?.id,
-    )
-    clearOrderDraft()
-    toast.success(editing ? `Đã cập nhật ${saved.code}` : `Đã tạo ${saved.code}`)
-    navigate(`/don-hang/${saved.id}`, { replace: true })
+    // The server recomputes every amount; what is sent is what the person typed.
+    return run(async () => {
+      const saved = await saveOrder(
+        {
+          customerId,
+          date,
+          lines: valid.map((l) => ({
+            id: l.id,
+            type: l.type,
+            productId: l.productId,
+            unitId: l.unitId,
+            qty: parseQty(l.qty),
+            price: Number(l.price) || 0,
+          })),
+          vat: vatEnabled
+            ? { ratePercent: vatRate, ...(vatManual !== '' ? { amount: Number(vatManual) || 0 } : {}) }
+            : null,
+          fees: fees
+            .filter((f) => Number(f.amount) > 0)
+            .map((f) => ({ id: f.id, name: f.name.trim() || 'Chi phí', amount: Number(f.amount) })),
+          note: note.trim(),
+        },
+        editing,
+      )
+      clearOrderDraft()
+      toast.success(editing ? `Đã cập nhật ${saved.code}` : `Đã tạo ${saved.code}`)
+      navigate(`/don-hang/${saved.id}`, { replace: true })
+    })
+  }
+
+  if (orderId && !editing) {
+    return editError ? <ErrorCard error={editError} onRetry={reloadEditing} /> : <LoadingCard />
   }
 
   return (
@@ -202,14 +233,13 @@ export default function OrderFormPage() {
       <div className="space-y-3">
         {lines.map((l, idx) => {
           const isReturn = l.type === 'return'
-          const bookPrice =
-            l.productId && l.unitId ? data.getPrice(customerId, l.productId, l.unitId) : null
+          const bookPrice = l.productId && l.unitId ? getPrice(l.productId, l.unitId) : null
           const priceDiffers =
             l.productId && l.unitId && l.price !== '' && Number(l.price) !== bookPrice
           // cảnh báo trả vượt đã mua (không chặn)
           const pr = l.productId && l.unitId ? boughtMap.get(`${l.productId}|${l.unitId}`) : null
           const overReturn =
-            isReturn && pr && Number(l.qty) > 0 && Number(l.qty) > pr.bought - pr.returned
+            isReturn && pr && parseQty(l.qty) > 0 && parseQty(l.qty) > pr.bought - pr.returned
           return (
             <Card key={l.id} className={`p-4 ${isReturn ? 'border-amber-200 bg-amber-50/40' : ''}`}>
               <div className="mb-2.5 flex items-center justify-between gap-2">
@@ -296,26 +326,11 @@ export default function OrderFormPage() {
                     placeholder="Tên quy cách mới (VD: Bao, Lốc)..."
                     className="h-9 flex-1 text-[13px]"
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newUnitName.trim()) {
-                        const u = data.addUnit(newUnitName.trim())
-                        pickUnit(l.id, u.id)
-                        setAddingUnitFor(null)
-                        toast.success(`Đã thêm quy cách "${u.name}"`)
-                      }
+                      if (e.key === 'Enter') createUnitFor(l.id)
                       if (e.key === 'Escape') setAddingUnitFor(null)
                     }}
                   />
-                  <Button
-                    size="sm"
-                    className="h-9"
-                    onClick={() => {
-                      if (!newUnitName.trim()) return
-                      const u = data.addUnit(newUnitName.trim())
-                      pickUnit(l.id, u.id)
-                      setAddingUnitFor(null)
-                      toast.success(`Đã thêm quy cách "${u.name}"`)
-                    }}
-                  >
+                  <Button size="sm" className="h-9" onClick={() => createUnitFor(l.id)}>
                     Thêm
                   </Button>
                 </div>
@@ -356,17 +371,19 @@ export default function OrderFormPage() {
               {/* gợi ý lưu bảng giá */}
               {priceDiffers && customerId && (
                 <button
-                  onClick={() => {
-                    setPrice({
-                      customerId,
-                      productId: l.productId,
-                      unitId: l.unitId,
-                      price: Number(l.price),
+                  onClick={() =>
+                    run(async () => {
+                      await setPrice({
+                        customerId,
+                        productId: l.productId,
+                        unitId: l.unitId,
+                        price: Number(l.price),
+                      })
+                      toast.success(
+                        bookPrice === null ? 'Đã lưu giá cho khách này' : 'Đã cập nhật bảng giá',
+                      )
                     })
-                    toast.success(
-                      bookPrice === null ? 'Đã lưu giá cho khách này' : 'Đã cập nhật bảng giá',
-                    )
-                  }}
+                  }
                   className="mt-2 flex items-center gap-1.5 rounded-lg bg-cyan-50 px-2.5 py-1.5 text-[12px] font-semibold text-cyan-700"
                 >
                   <BadgeDollarSign size={14} />

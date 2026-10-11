@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Package, Ruler, Plus, Pencil, Trash2, Check, X } from 'lucide-react'
 import { useStore } from '../store/useStore'
+import { useAction } from '../hooks/useAction'
 import { Card, Empty, Button, SegmentedTabs, Input, Confirm } from '../components/ui'
 import { useToast } from '../components/Toast'
 
@@ -72,20 +73,28 @@ export default function ProductsPage() {
   const [del, setDel] = useState(null) // {type, id, name}
   const data = useStore()
   const toast = useToast()
+  const run = useAction()
 
   const isProd = tab === 'products'
   const items = isProd ? data.products : data.units
 
   const add = () => {
-    if (!newName.trim()) return
-    if (isProd) {
-      data.addProduct(newName.trim())
-      toast.success('Đã thêm sản phẩm')
-    } else {
-      data.addUnit(newName.trim())
-      toast.success('Đã thêm quy cách')
-    }
+    const name = newName.trim()
+    if (!name) return
+    // Clear at once so the next name can be typed while this one is being saved.
     setNewName('')
+    return run(async () => {
+      if (isProd) {
+        await data.addProduct(name)
+        toast.success('Đã thêm sản phẩm')
+      } else {
+        await data.addUnit(name)
+        toast.success('Đã thêm quy cách')
+      }
+      return true
+    }).then((saved) => {
+      if (!saved) setNewName(name)
+    })
   }
 
   return (
@@ -126,11 +135,13 @@ export default function ProductsPage() {
             <EditableRow
               key={it.id}
               name={it.name}
-              onRename={(name) => {
-                if (isProd) data.renameProduct(it.id, name)
-                else data.renameUnit(it.id, name)
-                toast.success('Đã đổi tên')
-              }}
+              onRename={(name) =>
+                run(async () => {
+                  if (isProd) await data.renameProduct(it.id, name)
+                  else await data.renameUnit(it.id, name)
+                  toast.success('Đã đổi tên')
+                })
+              }
               onDelete={() => setDel({ id: it.id, name: it.name })}
             />
           ))}
@@ -140,11 +151,13 @@ export default function ProductsPage() {
       <Confirm
         open={!!del}
         onClose={() => setDel(null)}
-        onConfirm={() => {
-          if (isProd) data.removeProduct(del.id)
-          else data.removeUnit(del.id)
-          toast.success(`Đã xóa "${del.name}"`)
-        }}
+        onConfirm={() =>
+          run(async () => {
+            if (isProd) await data.removeProduct(del.id)
+            else await data.removeUnit(del.id)
+            toast.success(`Đã xóa "${del.name}"`)
+          })
+        }
         title={isProd ? 'Xóa sản phẩm?' : 'Xóa quy cách?'}
         message={`"${del?.name}" sẽ bị xóa. Các đơn cũ vẫn giữ nguyên tên đã lưu.`}
       />

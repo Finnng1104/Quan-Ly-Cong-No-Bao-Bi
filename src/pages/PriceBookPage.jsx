@@ -2,13 +2,18 @@ import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Tags, User, Plus, Copy, Trash2, Package } from 'lucide-react'
 import { useStore, productName, unitName, customerName } from '../store/useStore'
+import { api } from '../api/httpApi'
+import { useAsync } from '../hooks/useAsync'
+import { useAction } from '../hooks/useAction'
 import { fmtMoney } from '../lib/format'
 import { Card, Empty, Button, Input, Modal, Field, Confirm } from '../components/ui'
+import { ErrorCard } from '../components/AsyncState'
 import { PickerModal, PickerButton, Avatar } from '../components/pickers'
 import { useToast } from '../components/Toast'
 
 function PriceRow({ entry, data, onDelete }) {
   const [v, setV] = useState(String(entry.price))
+  const run = useAction()
   const dirty = String(entry.price) !== v
   return (
     <div className="flex items-center gap-2.5 px-4 py-2.5">
@@ -25,7 +30,7 @@ function PriceRow({ entry, data, onDelete }) {
           onChange={(e) => setV(e.target.value.replace(/[^0-9]/g, ''))}
           onBlur={() => {
             if (dirty && v) {
-              data.setPrice({ ...entry, price: Number(v) })
+              run(() => data.setPrice({ ...entry, customerId: entry.customerId, price: Number(v) }))
             }
           }}
           onKeyDown={(e) => {
@@ -57,30 +62,45 @@ export default function PriceBookPage() {
   const [prodPicker, setProdPicker] = useState(false)
   const data = useStore()
   const toast = useToast()
+  const run = useAction()
 
-  const entries = useMemo(
-    () =>
-      data.priceBook
-        .filter((p) => p.customerId === customerId)
-        .sort((a, b) =>
-          productName(data, a.productId).localeCompare(productName(data, b.productId), 'vi'),
-        ),
-    [data, customerId],
+  const { data: priceList, error, reload } = useAsync(
+    async () => (customerId ? { customerId, items: await api.customers.prices(customerId) } : null),
+    [customerId, data.dataVersion],
+  )
+
+  // Prices belong to the chosen customer; keep the customer id on each entry for saving edits.
+  const entries = useMemo(() => {
+    if (!priceList || priceList.customerId !== customerId) return []
+    return priceList.items
+      .map((p) => ({ ...p, customerId }))
+      .sort((a, b) =>
+        productName(data, a.productId).localeCompare(productName(data, b.productId), 'vi'),
+      )
+  }, [priceList, customerId, data])
+
+  // Only needed while the copy dialog is open: it shows how many prices each customer has.
+  const copyOpen = copyFrom !== null
+  const { data: allCustomers } = useAsync(
+    () => (copyOpen ? api.customers.listAll() : null),
+    [copyOpen],
   )
 
   const addEntry = () => {
     if (!newProd || !newUnit) return toast.error('Chọn sản phẩm và quy cách')
-    data.setPrice({
-      customerId,
-      productId: newProd,
-      unitId: newUnit,
-      price: Number(newPrice) || 0,
+    return run(async () => {
+      await data.setPrice({
+        customerId,
+        productId: newProd,
+        unitId: newUnit,
+        price: Number(newPrice) || 0,
+      })
+      toast.success('Đã thêm giá')
+      setAddOpen(false)
+      setNewProd('')
+      setNewUnit('')
+      setNewPrice('')
     })
-    toast.success('Đã thêm giá')
-    setAddOpen(false)
-    setNewProd('')
-    setNewUnit('')
-    setNewPrice('')
   }
 
   return (
@@ -114,6 +134,8 @@ export default function PriceBookPage() {
         <Card>
           <Empty icon={Tags} title="Chọn một khách" desc="Chọn khách để xem và sửa bảng giá riêng" />
         </Card>
+      ) : error && !priceList ? (
+        <ErrorCard error={error} onRetry={reload} />
       ) : (
         <>
           <div className="flex items-center justify-between">
@@ -164,7 +186,7 @@ export default function PriceBookPage() {
         items={data.customers}
         getKey={(c) => c.id}
         filterText={(c) => `${c.name} ${c.phone}`}
-        onPick={setCustomerId}
+        onPick={(c) => setCustomerId(c.id)}
         renderItem={(c) => (
           <>
             <Avatar name={c.name} />
@@ -238,24 +260,28 @@ export default function PriceBookPage() {
           Chép toàn bộ giá từ khách nguồn sang <b>{customerName(data, customerId)}</b> (ghi đè giá cũ).
         </p>
         <div className="max-h-[45vh] space-y-1.5 overflow-y-auto">
-          {data.customers
+          {(allCustomers ?? data.customers)
             .filter((c) => c.id !== customerId)
             .map((c) => {
-              const n = data.priceBook.filter((p) => p.customerId === c.id).length
+              const n = c.priceCount ?? 0
               return (
                 <button
                   key={c.id}
-                  onClick={() => {
-                    data.copyPrices(c.id, customerId)
-                    toast.success(`Đã chép ${n} mức giá từ ${c.name}`)
-                    setCopyFrom(null)
-                  }}
+                  onClick={() =>
+                    run(async () => {
+                      await data.copyPrices(c.id, customerId)
+                      toast.success(`Đã chép ${n} mức giá từ ${c.name}`)
+                      setCopyFrom(null)
+                    })
+                  }
                   className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-indigo-50/60"
                 >
                   <Avatar name={c.name} />
                   <div className="flex-1">
                     <p className="text-[14px] font-semibold text-slate-800">{c.name}</p>
-                    <p className="text-[11.5px] text-slate-400">{n} mức giá</p>
+                    <p className="text-[11.5px] text-slate-400">
+                      {allCustomers ? `${n} mức giá` : 'Đang tải...'}
+                    </p>
                   </div>
                   <Copy size={15} className="text-slate-300" />
                 </button>
@@ -267,10 +293,12 @@ export default function PriceBookPage() {
       <Confirm
         open={!!delId}
         onClose={() => setDelId(null)}
-        onConfirm={() => {
-          data.removePrice(delId)
-          toast.success('Đã xóa mức giá')
-        }}
+        onConfirm={() =>
+          run(async () => {
+            await data.removePrice(delId)
+            toast.success('Đã xóa mức giá')
+          })
+        }
         title="Xóa mức giá?"
         message="Giá này sẽ bị xóa khỏi bảng giá của khách. Đơn đã lập không đổi."
       />

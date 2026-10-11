@@ -4,6 +4,9 @@ import { BrowserRouter } from 'react-router-dom'
 import './index.css'
 import App from './App.jsx'
 import { ToastProvider } from './components/Toast.jsx'
+import { installErrorReporting } from './api/errorReporting'
+
+installErrorReporting()
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

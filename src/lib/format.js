@@ -63,6 +63,13 @@ export function parseNum(s) {
   return Number.isFinite(n) ? n : 0
 }
 
+// quantity typed in a form: "1,5" and "1.5" both mean one and a half
+export function parseQty(s) {
+  if (s === null || s === undefined || s === '') return 0
+  const n = Number(String(s).replace(',', '.'))
+  return Number.isFinite(n) ? n : 0
+}
+
 export function uid(prefix = 'id') {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }

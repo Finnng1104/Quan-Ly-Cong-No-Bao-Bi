@@ -1,17 +1,17 @@
 import { forwardRef } from 'react'
 import { fmtMoney, fmtDate, fmtQty } from '../lib/format'
-import { balanceBeforeOrder } from '../lib/debt'
 
 /**
  * Phiếu HÓA ĐƠN BÁN LẺ — bố cục theo mẫu Excel:
  * Tiêu đề, số phiếu, khách, ngày | bảng SỐ LƯỢNG-QUY CÁCH-SẢN PHẨM-GIÁ-THÀNH TIỀN
  * Cuối: TỔNG ĐƠN HÀNG / CÔNG NỢ CŨ / CÔNG NỢ MỚI (nếu bật trong Cài đặt)
+ *
+ * `oldDebt` là dư nợ ngay trước đơn này, do máy chủ tính (balanceBefore của đơn).
  */
 const OrderTicket = forwardRef(function OrderTicket(
-  { order, customer, data, showDebt = true, shopName },
+  { order, customer, data, oldDebt = 0, showDebt = true, shopName },
   ref,
 ) {
-  const oldDebt = showDebt ? balanceBeforeOrder(customer.id, data, order) : 0
   const newDebt = oldDebt + order.total
   const returnTotal = order.lines
     .filter((l) => l.type === 'return')

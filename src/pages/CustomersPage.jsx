@@ -1,17 +1,23 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Search, UserPlus, ChevronRight, ArrowDownWideNarrow, CalendarDays, Download } from 'lucide-react'
 import { useStore } from '../store/useStore'
-import { debtsByCustomer, dayActivitiesByCustomer, customerDebtRows } from '../lib/debt'
-import { normalize, todayISO, fmtMoney, fmtDate, toCsv, downloadText } from '../lib/format'
+import { api } from '../api/httpApi'
+import { useAsync } from '../hooks/useAsync'
+import { useAction } from '../hooks/useAction'
+import { todayISO, fmtMoney, fmtDate, toCsv, downloadText } from '../lib/format'
 import { Card, Money, Empty, Modal, Button, Field, Input, Textarea } from '../components/ui'
+import { ErrorCard } from '../components/AsyncState'
 import { Avatar } from '../components/pickers'
 import { useToast } from '../components/Toast'
+
+const SEARCH_DEBOUNCE_MS = 250
 
 export function CustomerForm({ open, onClose, initial }) {
   const addCustomer = useStore((s) => s.addCustomer)
   const editCustomer = useStore((s) => s.editCustomer)
   const toast = useToast()
+  const run = useAction()
   const [f, setF] = useState(
     initial || { name: '', phone: '', address: '', note: '', openingAmount: '', openingDate: todayISO() },
   )
@@ -36,16 +42,18 @@ export function CustomerForm({ open, onClose, initial }) {
       phone: f.phone,
       address: f.address,
       note: f.note,
-      openingDebt: { amount: Number(f.openingAmount) || 0, date: f.openingDate },
+      openingDebt: { amount: Number(f.openingAmount) || 0, date: f.openingDate || undefined },
     }
-    if (initial?.id) {
-      editCustomer(initial.id, payload)
-      toast.success('Đã cập nhật khách')
-    } else {
-      addCustomer(payload)
-      toast.success('Đã thêm khách mới')
-    }
-    onClose()
+    return run(async () => {
+      if (initial?.id) {
+        await editCustomer(initial.id, payload)
+        toast.success('Đã cập nhật khách')
+      } else {
+        await addCustomer(payload)
+        toast.success('Đã thêm khách mới')
+      }
+      onClose()
+    })
   }
 
   return (
@@ -85,24 +93,36 @@ export default function CustomersPage() {
   const [sortDesc, setSortDesc] = useState(true)
   const [formOpen, setFormOpen] = useState(false)
   const [limit, setLimit] = useState(30)
-  const data = useStore()
+  const [debouncedQ, setDebouncedQ] = useState('')
+  const dataVersion = useStore((s) => s.dataVersion)
+  const toast = useToast()
+  const run = useAction()
 
-  const list = useMemo(() => {
-    const debts = debtsByCustomer(data, date)
-    const acts = dayActivitiesByCustomer(data, date)
-    const nq = normalize(q)
-    return data.customers
-      .map((c) => ({ ...c, debt: debts[c.id] || 0, act: acts[c.id] || { up: 0, down: 0 } }))
-      .filter((c) => !nq || normalize(c.name + ' ' + c.phone).includes(nq))
-      .sort((a, b) => (sortDesc ? b.debt - a.debt : a.debt - b.debt) || a.name.localeCompare(b.name, 'vi'))
-  }, [data, date, q, sortDesc])
+  // Typing searches on the server, but only once the person pauses.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQ(q), SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [q])
 
-  const shown = list.slice(0, limit)
-  const totalDebt = list.reduce((s, c) => s + c.debt, 0)
+  const { data: page, error, reload } = useAsync(
+    () =>
+      api.customers.list({
+        q: debouncedQ,
+        sort: sortDesc ? 'debt_desc' : 'debt_asc',
+        asOf: date,
+        limit,
+        offset: 0,
+      }),
+    [debouncedQ, sortDesc, date, limit, dataVersion],
+  )
+
+  const shown = page?.items ?? []
+  const matchCount = page?.total ?? 0
+  const totalDebt = page?.summary.totalDebt ?? 0
 
   // Xuất danh sách công nợ cuối của khách hàng (CSV — mở bằng Excel)
-  const exportDebt = () => {
-    const rows = customerDebtRows(data, date)
+  const exportDebt = () => run(async () => {
+    const rows = await api.reports.customerDebts(date)
     const head = [
       'STT',
       'Khách hàng',
@@ -142,7 +162,7 @@ export default function CustomersPage() {
       'text/csv;charset=utf-8',
     )
     toast.success(`Đã xuất công nợ ${rows.length} khách đến ${fmtDate(date)}`)
-  }
+  })
 
   return (
     <div className="animate-fade-up space-y-4">
@@ -189,7 +209,7 @@ export default function CustomersPage() {
 
       <div className="flex items-center justify-between">
         <p className="text-[13px] font-semibold text-slate-500">
-          {list.length} khách · tổng nợ <span className="text-amber-600">{fmtMoney(totalDebt)} đ</span>
+          {matchCount} khách · tổng nợ <span className="text-amber-600">{fmtMoney(totalDebt)} đ</span>
         </p>
         <button
           onClick={() => setSortDesc((v) => !v)}
@@ -200,7 +220,9 @@ export default function CustomersPage() {
         </button>
       </div>
 
-      {shown.length === 0 ? (
+      {error && !page ? (
+        <ErrorCard error={error} onRetry={reload} />
+      ) : shown.length === 0 ? (
         <Card>
           <Empty title="Không tìm thấy khách" desc="Thử từ khóa khác hoặc thêm khách mới" />
         </Card>
@@ -240,9 +262,9 @@ export default function CustomersPage() {
         </Card>
       )}
 
-      {list.length > shown.length && (
+      {matchCount > shown.length && (
         <Button variant="outline" className="w-full" onClick={() => setLimit((l) => l + 30)}>
-          Xem thêm ({list.length - shown.length} khách)
+          Xem thêm ({matchCount - shown.length} khách)
         </Button>
       )}
 

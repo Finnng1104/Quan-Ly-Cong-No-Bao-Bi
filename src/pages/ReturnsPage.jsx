@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Undo2,
@@ -9,8 +9,11 @@ import {
   Save,
 } from 'lucide-react'
 import { useStore, productName, unitName, customerName } from '../store/useStore'
-import { purchasedReturned } from '../lib/debt'
-import { todayISO, fmtMoney, fmtDate, fmtQty, uid } from '../lib/format'
+import { api } from '../api/httpApi'
+import { useAsync } from '../hooks/useAsync'
+import { useAction } from '../hooks/useAction'
+import { useCustomerPrices, usePurchasedReturned } from '../hooks/customerData'
+import { todayISO, fmtMoney, fmtDate, fmtQty, parseQty, uid } from '../lib/format'
 import {
   Card,
   Money,
@@ -22,14 +25,18 @@ import {
   Confirm,
 } from '../components/ui'
 import { PickerModal, PickerButton, Avatar } from '../components/pickers'
+import { ErrorCard } from '../components/AsyncState'
 import ProductCombo from '../components/ProductCombo'
 import { useToast } from '../components/Toast'
+
+const PAGE_SIZE = 60
 
 const newLine = () => ({ id: uid('l'), productId: '', unitId: '', qty: '', price: '' })
 
 function ReturnForm({ open, onClose, presetCustomer }) {
   const data = useStore()
   const toast = useToast()
+  const run = useAction()
   const [customerId, setCustomerId] = useState(presetCustomer || '')
   const [date, setDate] = useState(todayISO())
   const [reason, setReason] = useState('')
@@ -38,10 +45,8 @@ function ReturnForm({ open, onClose, presetCustomer }) {
   const [addingUnitFor, setAddingUnitFor] = useState(null)
   const [newUnitName, setNewUnitName] = useState('')
 
-  const boughtMap = useMemo(
-    () => (customerId ? purchasedReturned(customerId, data) : new Map()),
-    [customerId, data],
-  )
+  const { getPrice } = useCustomerPrices(customerId)
+  const boughtMap = usePurchasedReturned(customerId)
 
   const updateLine = (lid, patch) =>
     setLines((ls) => ls.map((l) => (l.id === lid ? { ...l, ...patch } : l)))
@@ -50,7 +55,7 @@ function ReturnForm({ open, onClose, presetCustomer }) {
     const l = lines.find((x) => x.id === lid)
     const patch = { productId: p.id }
     if (l?.unitId) {
-      const pr = data.getPrice(customerId, p.id, l.unitId)
+      const pr = getPrice(p.id, l.unitId)
       if (pr !== null) patch.price = String(pr)
     }
     updateLine(lid, patch)
@@ -60,21 +65,31 @@ function ReturnForm({ open, onClose, presetCustomer }) {
     const l = lines.find((x) => x.id === lid)
     const patch = { unitId }
     if (l?.productId) {
-      const pr = data.getPrice(customerId, l.productId, unitId)
+      const pr = getPrice(l.productId, unitId)
       if (pr !== null) patch.price = String(pr)
     }
     updateLine(lid, patch)
   }
 
-  const total = lines.reduce((s, l) => s + Math.round((Number(l.qty) || 0) * (Number(l.price) || 0)), 0)
+  const total = lines.reduce((s, l) => s + Math.round(parseQty(l.qty) * (Number(l.price) || 0)), 0)
+
+  const createUnitFor = (lineId) =>
+    run(async () => {
+      const name = newUnitName.trim()
+      if (!name) return
+      const unit = await data.addUnit(name)
+      pickUnit(lineId, unit.id)
+      setAddingUnitFor(null)
+      toast.success(`Đã thêm quy cách "${unit.name}"`)
+    })
 
   // cảnh báo trả vượt (không chặn)
   const overWarnings = lines
-    .filter((l) => l.productId && l.unitId && Number(l.qty) > 0)
+    .filter((l) => l.productId && l.unitId && parseQty(l.qty) > 0)
     .map((l) => {
       const cur = boughtMap.get(`${l.productId}|${l.unitId}`) || { bought: 0, returned: 0 }
       const remain = cur.bought - cur.returned
-      return Number(l.qty) > remain
+      return parseQty(l.qty) > remain
         ? `${productName(data, l.productId)}: chỉ mua ${fmtQty(cur.bought)}, đã trả ${fmtQty(cur.returned)}`
         : null
     })
@@ -82,16 +97,23 @@ function ReturnForm({ open, onClose, presetCustomer }) {
 
   const save = () => {
     if (!customerId) return toast.error('Vui lòng chọn khách')
-    const valid = lines.filter((l) => l.productId && l.unitId && Number(l.qty) > 0)
+    const valid = lines.filter((l) => l.productId && l.unitId && parseQty(l.qty) > 0)
     if (valid.length === 0) return toast.error('Cần ít nhất 1 dòng hàng trả')
-    const rec = data.addReturn({
-      customerId,
-      date,
-      reason,
-      lines: valid.map((l) => ({ ...l, qty: Number(l.qty), price: Number(l.price) || 0 })),
+    return run(async () => {
+      const rec = await data.addReturn({
+        customerId,
+        date,
+        reason,
+        lines: valid.map((l) => ({
+          productId: l.productId,
+          unitId: l.unitId,
+          qty: parseQty(l.qty),
+          price: Number(l.price) || 0,
+        })),
+      })
+      toast.success(`Đã tạo ${rec.code} — trừ ${fmtMoney(rec.total)} đ vào công nợ`)
+      onClose()
     })
-    toast.success(`Đã tạo ${rec.code} — trừ ${fmtMoney(rec.total)} đ vào công nợ`)
-    onClose()
   }
 
   return (
@@ -162,27 +184,11 @@ function ReturnForm({ open, onClose, presetCustomer }) {
                   placeholder="Tên quy cách mới..."
                   className="h-9 flex-1 text-[13px]"
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && newUnitName.trim()) {
-                      const u = data.addUnit(newUnitName.trim())
-                      pickUnit(l.id, u.id)
-                      setAddingUnitFor(null)
-                      toast.success(`Đã thêm quy cách "${u.name}"`)
-                    }
+                    if (e.key === 'Enter') createUnitFor(l.id)
                     if (e.key === 'Escape') setAddingUnitFor(null)
                   }}
                 />
-                <Button
-                  size="sm"
-                  variant="amber"
-                  className="h-9"
-                  onClick={() => {
-                    if (!newUnitName.trim()) return
-                    const u = data.addUnit(newUnitName.trim())
-                    pickUnit(l.id, u.id)
-                    setAddingUnitFor(null)
-                    toast.success(`Đã thêm quy cách "${u.name}"`)
-                  }}
-                >
+                <Button size="sm" variant="amber" className="h-9" onClick={() => createUnitFor(l.id)}>
                   Thêm
                 </Button>
               </div>
@@ -243,7 +249,7 @@ function ReturnForm({ open, onClose, presetCustomer }) {
         items={data.customers}
         getKey={(c) => c.id}
         filterText={(c) => `${c.name} ${c.phone}`}
-        onPick={setCustomerId}
+        onPick={(c) => setCustomerId(c.id)}
         renderItem={(c) => (
           <>
             <Avatar name={c.name} />
@@ -259,16 +265,17 @@ export default function ReturnsPage() {
   const [sp] = useSearchParams()
   const [formOpen, setFormOpen] = useState(!!sp.get('khach'))
   const [delId, setDelId] = useState(null)
+  const [limit, setLimit] = useState(PAGE_SIZE)
   const data = useStore()
   const toast = useToast()
+  const run = useAction()
 
-  const returns = useMemo(
-    () =>
-      data.returns
-        .filter((r) => !r.deletedAt)
-        .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.seq - a.seq)),
-    [data],
+  const { data: page, error, reload } = useAsync(
+    () => api.returns.list({ limit, offset: 0 }),
+    [limit, data.dataVersion],
   )
+  const returns = page?.items ?? []
+  const returnCount = page?.total ?? 0
 
   return (
     <div className="animate-fade-up space-y-4">
@@ -282,7 +289,9 @@ export default function ReturnsPage() {
         </Button>
       </div>
 
-      {returns.length === 0 ? (
+      {error && !page ? (
+        <ErrorCard error={error} onRetry={reload} />
+      ) : returns.length === 0 ? (
         <Card>
           <Empty icon={Undo2} title="Chưa có phiếu trả nào" />
         </Card>
@@ -319,6 +328,12 @@ export default function ReturnsPage() {
         </Card>
       )}
 
+      {returnCount > returns.length && (
+        <Button variant="outline" className="w-full" onClick={() => setLimit((n) => n + PAGE_SIZE)}>
+          Xem thêm ({returnCount - returns.length} phiếu)
+        </Button>
+      )}
+
       <ReturnForm
         open={formOpen}
         onClose={() => setFormOpen(false)}
@@ -328,10 +343,12 @@ export default function ReturnsPage() {
       <Confirm
         open={!!delId}
         onClose={() => setDelId(null)}
-        onConfirm={() => {
-          data.removeReturn(delId)
-          toast.success('Đã xóa phiếu trả')
-        }}
+        onConfirm={() =>
+          run(async () => {
+            await data.removeReturn(delId)
+            toast.success('Đã xóa phiếu trả')
+          })
+        }
         title="Xóa phiếu trả?"
         message="Phiếu trả sẽ bị xóa và cộng lại vào công nợ của khách."
       />

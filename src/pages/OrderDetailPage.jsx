@@ -13,8 +13,12 @@ import {
   FileText,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
+import { api } from '../api/httpApi'
+import { useAsync } from '../hooks/useAsync'
+import { useAction } from '../hooks/useAction'
 import { fmtMoney, fmtDateTime } from '../lib/format'
 import { Card, Button, Badge, Confirm, Modal, Empty } from '../components/ui'
+import { ErrorCard, LoadingCard } from '../components/AsyncState'
 import OrderTicket from '../components/OrderTicket'
 import { useToast } from '../components/Toast'
 
@@ -23,7 +27,12 @@ export default function OrderDetailPage() {
   const navigate = useNavigate()
   const data = useStore()
   const toast = useToast()
-  const order = data.orders.find((o) => o.id === id)
+  const run = useAction()
+  // The order comes with the debt before/after it and its edit history, all computed by the server.
+  const { data: order, loading, error, reload } = useAsync(
+    () => api.orders.get(id),
+    [id, data.dataVersion],
+  )
   const customer = data.customers.find((c) => c.id === order?.customerId)
   const [confirmDel, setConfirmDel] = useState(false)
   const [printOpen, setPrintOpen] = useState(false)
@@ -33,6 +42,8 @@ export default function OrderDetailPage() {
 
   const showDebt = data.settings.showDebtOnTicket
 
+  if (!order && loading) return <LoadingCard />
+  if (!order && error && error.status !== 404) return <ErrorCard error={error} onRetry={reload} />
   if (!order || !customer) {
     return (
       <Card>
@@ -98,10 +109,12 @@ export default function OrderDetailPage() {
             variant="outline"
             size="sm"
             icon={RotateCcw}
-            onClick={() => {
-              data.restoreOrder(order.id)
-              toast.success('Đã khôi phục đơn')
-            }}
+            onClick={() =>
+              run(async () => {
+                await data.restoreOrder(order.id)
+                toast.success('Đã khôi phục đơn')
+              })
+            }
           >
             Khôi phục
           </Button>
@@ -133,6 +146,7 @@ export default function OrderDetailPage() {
           order={order}
           customer={customer}
           data={data}
+          oldDebt={order.balanceBefore ?? 0}
           showDebt={showDebt}
           shopName={data.settings.shopName}
         />
@@ -144,6 +158,7 @@ export default function OrderDetailPage() {
           order={order}
           customer={customer}
           data={data}
+          oldDebt={order.balanceBefore ?? 0}
           showDebt={showDebt}
           shopName={data.settings.shopName}
         />
@@ -213,11 +228,13 @@ export default function OrderDetailPage() {
       <Confirm
         open={confirmDel}
         onClose={() => setConfirmDel(false)}
-        onConfirm={() => {
-          data.removeOrder(order.id)
-          toast.success(`Đã xóa ${order.code}`)
-          navigate('/don-hang')
-        }}
+        onConfirm={() =>
+          run(async () => {
+            await data.removeOrder(order.id)
+            toast.success(`Đã xóa ${order.code}`)
+            navigate('/don-hang')
+          })
+        }
         title="Xóa đơn hàng?"
         message={`Đơn ${order.code} trị giá ${fmtMoney(order.total)} đ sẽ bị xóa và trừ khỏi công nợ của ${customer.name}. Bạn có thể khôi phục sau.`}
         confirmText="Xóa đơn"

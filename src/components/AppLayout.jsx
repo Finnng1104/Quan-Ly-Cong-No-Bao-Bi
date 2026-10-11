@@ -17,8 +17,9 @@ import {
   X,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
+import { api } from '../api/httpApi'
+import { useAsync } from '../hooks/useAsync'
 import { fmtMoney, todayISO } from '../lib/format'
-import { totalDebtAt } from '../lib/debt'
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Tổng quan', end: true },
@@ -57,9 +58,11 @@ export default function AppLayout() {
   const [moreOpen, setMoreOpen] = useState(false)
   const logout = useStore((s) => s.logout)
   const shopName = useStore((s) => s.settings.shopName)
-  const data = useStore()
+  const dataVersion = useStore((s) => s.dataVersion)
   const navigate = useNavigate()
-  const totalDebt = totalDebtAt(data, todayISO())
+  // The total shown in the sidebar follows every save, through dataVersion.
+  const { data: board } = useAsync(() => api.reports.dashboard(todayISO()), [dataVersion])
+  const totalDebt = board?.totalDebt ?? 0
 
   return (
     <div className="min-h-dvh bg-slate-50">

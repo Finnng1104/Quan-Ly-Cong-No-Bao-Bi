@@ -1,30 +1,35 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CalendarDays, TrendingUp, HandCoins, ReceiptText, ChevronRight } from 'lucide-react'
 import { AreaChart, Area, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useStore } from '../store/useStore'
-import { totalDebtAt, debtsByCustomer, dailyTotals, rangeTotals, debtSeries } from '../lib/debt'
-import { fmtMoney, fmtDate, todayISO, addDaysISO, monthOf } from '../lib/format'
+import { api } from '../api/httpApi'
+import { useAsync } from '../hooks/useAsync'
+import { fmtMoney, fmtDate, todayISO } from '../lib/format'
 import { Card, Money, Badge } from '../components/ui'
+import { ErrorCard } from '../components/AsyncState'
 import { Avatar } from '../components/pickers'
+
+const EMPTY_DAY = { orders: 0, orderCount: 0, payments: 0, paymentCount: 0, returns: 0 }
+const EMPTY_MONTH = { orders: 0, payments: 0, returns: 0, orderCount: 0 }
 
 export default function DashboardPage() {
   const [date, setDate] = useState(todayISO())
-  const data = useStore()
+  const dataVersion = useStore((s) => s.dataVersion)
+  const { data: board, error, reload } = useAsync(() => api.reports.dashboard(date), [date, dataVersion])
 
-  const totalDebt = useMemo(() => totalDebtAt(data, date), [data, date])
-  const day = useMemo(() => dailyTotals(data, date), [data, date])
-  const month = useMemo(() => rangeTotals(data, monthOf(date) + '-01', date), [data, date])
-  const series = useMemo(() => debtSeries(data, date, 14, addDaysISO), [data, date])
-
-  const topDebtors = useMemo(() => {
-    const debts = debtsByCustomer(data, date)
-    return data.customers
-      .map((c) => ({ ...c, debt: debts[c.id] || 0 }))
-      .filter((c) => c.debt > 0)
-      .sort((a, b) => b.debt - a.debt)
-      .slice(0, 5)
-  }, [data, date])
+  // All figures come from the server; zeros are shown until the first answer arrives.
+  const totalDebt = board?.totalDebt ?? 0
+  const debtorCount = board?.debtorCount ?? 0
+  const day = board?.day ?? EMPTY_DAY
+  const month = board?.month ?? EMPTY_MONTH
+  const series = board?.series ?? []
+  const topDebtors = (board?.topDebtors ?? []).map((d) => ({
+    id: d.customerId,
+    name: d.name,
+    phone: d.phone,
+    debt: d.balance,
+  }))
 
   return (
     <div className="animate-fade-up space-y-4">
@@ -42,6 +47,8 @@ export default function DashboardPage() {
         </label>
       </div>
 
+      {error && !board && <ErrorCard error={error} onRetry={reload} />}
+
       {/* Tổng công nợ */}
       <Card className="overflow-hidden">
         <div className="bg-gradient-to-br from-indigo-600 via-indigo-600 to-blue-600 p-5 text-white">
@@ -54,7 +61,7 @@ export default function DashboardPage() {
           </p>
           <div className="mt-3 flex items-center gap-1.5 text-[12px] font-medium text-indigo-100">
             <TrendingUp size={14} />
-            {topDebtors.length} khách còn nợ
+            {debtorCount} khách còn nợ
           </div>
         </div>
         <div className="grid grid-cols-3 divide-x divide-slate-100">
@@ -183,7 +190,7 @@ export default function DashboardPage() {
               <ChevronRight size={16} className="text-slate-300" />
             </Link>
           ))}
-          {topDebtors.length === 0 && (
+          {board && topDebtors.length === 0 && (
             <p className="px-4 py-6 text-center text-[13px] text-slate-400">
               Không có khách nào còn nợ 🎉
             </p>

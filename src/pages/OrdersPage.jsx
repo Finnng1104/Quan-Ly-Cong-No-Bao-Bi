@@ -1,35 +1,34 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { CalendarDays, History, ChevronRight, User, PlusCircle } from 'lucide-react'
 import { useStore } from '../store/useStore'
-import { fmtMoney, fmtDate, fmtQty, todayISO } from '../lib/format'
+import { api } from '../api/httpApi'
+import { useAsync } from '../hooks/useAsync'
+import { fmtMoney, fmtDate, fmtQty } from '../lib/format'
 import { Card, Money, Badge, Empty, Button } from '../components/ui'
+import { ErrorCard } from '../components/AsyncState'
 import { PickerModal, PickerButton, Avatar } from '../components/pickers'
 import { productName, unitName } from '../store/useStore'
+
+const PAGE_SIZE = 50
 
 export default function OrdersPage() {
   const navigate = useNavigate()
   const [date, setDate] = useState('')
   const [customerId, setCustomerId] = useState('')
   const [custPicker, setCustPicker] = useState(false)
+  const [limit, setLimit] = useState(PAGE_SIZE)
   const data = useStore()
 
-  const orders = useMemo(() => {
-    return data.orders
-      .filter((o) => !o.deletedAt)
-      .filter((o) => !date || o.date === date)
-      .filter((o) => !customerId || o.customerId === customerId)
-      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.seq - a.seq))
-  }, [data, date, customerId])
+  const { data: page, error, reload } = useAsync(
+    () => api.orders.list({ date, customerId, limit, offset: 0 }),
+    [date, customerId, limit, data.dataVersion],
+  )
 
-  const dayTotal = useMemo(() => {
-    const target = date || todayISO()
-    return data.orders
-      .filter((o) => !o.deletedAt && o.date === target)
-      .reduce((s, o) => s + o.total, 0)
-  }, [data, date])
-
-  const grandTotal = orders.reduce((s, o) => s + o.total, 0)
+  const orders = page?.items ?? []
+  const orderCount = page?.total ?? 0
+  const grandTotal = page?.summary.filteredTotal ?? 0
+  const dayTotal = page?.summary.dayTotal ?? 0
 
   return (
     <div className="animate-fade-up space-y-4">
@@ -61,6 +60,7 @@ export default function OrdersPage() {
             onClick={() => {
               setDate('')
               setCustomerId('')
+              setLimit(PAGE_SIZE)
             }}
             className="rounded-xl px-3 py-2 text-[13px] font-semibold text-rose-500 hover:bg-rose-50"
           >
@@ -70,13 +70,15 @@ export default function OrdersPage() {
       </Card>
 
       <div className="flex items-center justify-between text-[13px] font-semibold">
-        <span className="text-slate-500">{orders.length} đơn</span>
+        <span className="text-slate-500">{orderCount} đơn</span>
         <span className="text-slate-500">
           Tổng: <span className="text-indigo-700">{fmtMoney(grandTotal)} đ</span>
         </span>
       </div>
 
-      {orders.length === 0 ? (
+      {error && !page ? (
+        <ErrorCard error={error} onRetry={reload} />
+      ) : orders.length === 0 ? (
         <Card>
           <Empty title="Không có đơn nào" desc="Thử đổi bộ lọc hoặc tạo đơn mới" />
         </Card>
@@ -98,7 +100,7 @@ export default function OrdersPage() {
                     <p className="truncate text-[14px] font-semibold text-slate-800">
                       {c?.name || '—'}
                     </p>
-                    {o.editHistory?.length > 0 && (
+                    {o.editCount > 0 && (
                       <Badge tone="violet">
                         <History size={10} /> Đã điều chỉnh
                       </Badge>
@@ -123,6 +125,12 @@ export default function OrdersPage() {
             )
           })}
         </Card>
+      )}
+
+      {orderCount > orders.length && (
+        <Button variant="outline" className="w-full" onClick={() => setLimit((n) => n + PAGE_SIZE)}>
+          Xem thêm ({orderCount - orders.length} đơn)
+        </Button>
       )}
 
       {/* tổng cuối ngày */}

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   FileText,
@@ -9,9 +9,12 @@ import {
   CalendarDays,
 } from 'lucide-react'
 import { useStore, customerName } from '../store/useStore'
-import { ledgerRows, purchaseTotal } from '../lib/debt'
+import { api } from '../api/httpApi'
+import { useAsync } from '../hooks/useAsync'
+import { useAction } from '../hooks/useAction'
 import { fmtMoney, fmtDate, fmtDateTime, todayISO, addDaysISO } from '../lib/format'
 import { Card, Badge, Empty, Button, Field, Input } from '../components/ui'
+import { ErrorCard, LoadingCard } from '../components/AsyncState'
 import { PickerModal, PickerButton, Avatar } from '../components/pickers'
 import { useToast } from '../components/Toast'
 
@@ -23,59 +26,37 @@ export default function StatementPage() {
   const [custPicker, setCustPicker] = useState(false)
   const data = useStore()
   const toast = useToast()
+  const run = useAction()
 
-  const ledger = useMemo(
-    () => (customerId && from <= to ? ledgerRows(customerId, data, from, to) : null),
-    [customerId, from, to, data],
+  const rangeIsValid = from <= to
+  // Everything on this page — rows, balances, the "edited since last export" marks and the
+  // purchase totals — is computed by the server for the chosen customer and range.
+  const { data: statement, error, reload } = useAsync(
+    () => (customerId && rangeIsValid ? api.customers.statement(customerId, { from, to }) : null),
+    [customerId, from, to, rangeIsValid, data.dataVersion],
   )
 
-  // lần xuất sao kê gần nhất làm mốc đánh dấu
-  const lastExport = useMemo(
-    () => (customerId ? data.lastExportOf(customerId) : null),
-    [customerId, data],
-  )
-
-  // đơn sửa SAU lần xuất gần nhất
-  const editedOrders = useMemo(() => {
-    if (!customerId) return []
-    return data.ordersEditedAfter(customerId, lastExport?.exportedAt || null)
-  }, [customerId, lastExport, data])
-
-  const editedSet = useMemo(() => new Set(editedOrders.map((o) => o.id)), [editedOrders])
-
-  // Tổng tiền hàng khách đã lấy — trong kỳ chọn + 12 tháng gần nhất
-  const buyStats = useMemo(() => {
-    if (!customerId) return null
-    const yearAgo = new Date(to + 'T00:00:00')
-    yearAgo.setFullYear(yearAgo.getFullYear() - 1)
-    const yearFrom = yearAgo.toISOString().slice(0, 10)
-    return {
-      inRange: purchaseTotal(customerId, data, from, to),
-      year: purchaseTotal(customerId, data, yearFrom, to),
-    }
-  }, [customerId, data, from, to])
-
-  // chênh lệch tổng của các lần sửa sau mốc xuất
-  const totalDiff = useMemo(() => {
-    if (!lastExport) return 0
-    return editedOrders.reduce(
-      (s, o) =>
-        s +
-        (o.editHistory || [])
-          .filter((h) => h.editedAt > lastExport.exportedAt)
-          .reduce((x, h) => x + h.diff, 0),
-      0,
-    )
-  }, [editedOrders, lastExport])
+  const ledger = statement
+    ? { opening: statement.opening, rows: statement.rows, closing: statement.closing }
+    : null
+  const lastExport = statement?.lastExport ?? null
+  const editedOrders = statement?.editedOrders ?? []
+  const editedById = new Map(editedOrders.map((o) => [o.id, o]))
+  const totalDiff = statement?.totalDiff ?? 0
+  const buyStats = statement
+    ? { inRange: statement.purchaseTotals.range, year: statement.purchaseTotals.last12Months }
+    : null
 
   const doExport = (kind) => {
     if (!customerId) return toast.error('Chọn khách trước')
-    data.exportStatement({ customerId, from, to })
-    toast.success(
-      kind === 'pdf'
-        ? 'Đã xuất sao kê PDF (giả lập) — đã ghi nhớ lần xuất này'
-        : 'Đã xuất sao kê Excel (giả lập) — đã ghi nhớ lần xuất này',
-    )
+    return run(async () => {
+      await data.exportStatement(customerId, { from, to })
+      toast.success(
+        kind === 'pdf'
+          ? 'Đã xuất sao kê PDF (giả lập) — đã ghi nhớ lần xuất này'
+          : 'Đã xuất sao kê Excel (giả lập) — đã ghi nhớ lần xuất này',
+      )
+    })
   }
 
   return (
@@ -124,10 +105,14 @@ export default function StatementPage() {
         <Card>
           <Empty icon={FileText} title="Chọn khách để xem sao kê" />
         </Card>
-      ) : !ledger ? (
+      ) : !rangeIsValid ? (
         <Card>
           <Empty title="Khoảng ngày không hợp lệ" desc="Ngày bắt đầu phải trước ngày kết thúc" />
         </Card>
+      ) : error && !ledger ? (
+        <ErrorCard error={error} onRetry={reload} />
+      ) : !ledger ? (
+        <LoadingCard />
       ) : (
         <>
           {/* bảng sao kê */}
@@ -178,14 +163,9 @@ export default function StatementPage() {
                 <Empty title="Không có phát sinh trong kỳ" />
               )}
               {ledger.rows.map((r, i) => {
-                const isEdited = r.kind === 'order' && editedSet.has(r.refId)
-                const ord = r.kind === 'order' ? data.orders.find((o) => o.id === r.refId) : null
-                const latestEdit =
-                  isEdited && ord
-                    ? (ord.editHistory || [])
-                      .filter((h) => !lastExport || h.editedAt > lastExport.exportedAt)
-                      .slice(-1)[0]
-                    : null
+                const editedInfo = r.kind === 'order' ? editedById.get(r.refId) : undefined
+                const isEdited = !!editedInfo
+                const latestEdit = editedInfo?.latestEditSinceExport ?? null
                 return (
                   <div key={i} className="px-4 py-2.5">
                     {/* mobile: thẻ / desktop: hàng */}
@@ -264,7 +244,7 @@ export default function StatementPage() {
         items={data.customers}
         getKey={(c) => c.id}
         filterText={(c) => `${c.name} ${c.phone}`}
-        onPick={setCustomerId}
+        onPick={(c) => setCustomerId(c.id)}
         renderItem={(c) => (
           <>
             <Avatar name={c.name} />
