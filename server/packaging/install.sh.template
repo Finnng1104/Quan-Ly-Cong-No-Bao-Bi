@@ -1,0 +1,279 @@
+#!/bin/bash
+# Quản lý công nợ — cài đặt / cập nhật trên macOS.
+#
+#   curl -fsSL __BASE_URL__/install.sh | bash
+#
+# Chạy lại đúng lệnh này để cập nhật. Script an toàn khi chạy nhiều lần:
+#   - lần đầu: tải gói, kiểm chữ ký + sha256, tạo tài khoản chủ cửa hàng, đăng ký chạy nền;
+#   - lần sau: nếu có bản mới thì sao lưu dữ liệu, thay bản chạy, kiểm tra sức khỏe,
+#     và TỰ QUAY LẠI bản cũ (cùng dữ liệu cũ) nếu bản mới không chạy được.
+#
+# Biến môi trường (chủ yếu để thử nghiệm): QLCN_BASE_URL, QLCN_HOME, QLCN_LABEL, QLCN_PORT,
+# QLCN_ADMIN_USERNAME, QLCN_ADMIN_PASSWORD, QLCN_NO_OPEN.
+
+set -euo pipefail
+
+BASE_URL="${QLCN_BASE_URL:-__BASE_URL__}"
+HOME_DIR="${QLCN_HOME:-$HOME/Library/Application Support/QuanLyCongNo}"
+LABEL="${QLCN_LABEL:-vn.qlcn.server}"
+DEFAULT_PORT="${QLCN_PORT:-8686}"
+HEALTH_TIMEOUT_SECONDS=30
+
+# Khóa công khai dùng để kiểm chữ ký của manifest (khóa chính + khóa dự phòng).
+PUBLIC_KEYS_PEM='__PUBLIC_KEYS_PEM__'
+
+APP_DIR="$HOME_DIR/app"
+PREV_DIR="$HOME_DIR/app.prev"
+LOG_DIR="$HOME_DIR/logs"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+UID_NUM="$(id -u)"
+STAMP="$(date +%Y%m%dT%H%M%S)"
+
+mkdir -p "$LOG_DIR"
+LOG="$LOG_DIR/install-$STAMP.log"
+
+log() {
+  local line
+  line="[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*"
+  echo "$line"
+  echo "$line" >> "$LOG"
+}
+
+fail() {
+  log "LỖI: $*"
+  log "Chi tiết ở: $LOG"
+  exit 1
+}
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+[ "$(uname -s)" = "Darwin" ] || fail "install.sh chỉ dành cho macOS. Trên Windows dùng install.ps1."
+case "$(uname -m)" in
+  arm64) ARCH=arm64 ;;
+  x86_64) ARCH=x64 ;;
+  *) fail "Kiến trúc CPU không được hỗ trợ: $(uname -m)" ;;
+esac
+PLATFORM="darwin-$ARCH"
+
+json_get() { plutil -extract "$2" raw -o - "$1"; }
+
+# ---------- 1. manifest + chữ ký ----------
+log "Đang tải thông tin phiên bản..."
+curl -fsSL "$BASE_URL/manifest.json" -o "$TMP/manifest.json" || fail "Không tải được manifest từ $BASE_URL"
+curl -fsSL "$BASE_URL/manifest.sig.der" -o "$TMP/manifest.sig.der" || fail "Không tải được chữ ký manifest"
+
+awk -v dir="$TMP" '/-----BEGIN/{n++} {print > (dir "/key" n ".pem")}' <<< "$PUBLIC_KEYS_PEM"
+verified=no
+for key in "$TMP"/key*.pem; do
+  if openssl dgst -sha256 -verify "$key" -signature "$TMP/manifest.sig.der" "$TMP/manifest.json" > /dev/null 2>&1; then
+    verified=yes
+    break
+  fi
+done
+[ "$verified" = yes ] || fail "Chữ ký của manifest KHÔNG hợp lệ. Dừng để đảm bảo an toàn."
+
+TARGET_VERSION="$(json_get "$TMP/manifest.json" version)"
+ARCHIVE_URL="$(json_get "$TMP/manifest.json" "files.$PLATFORM.url")" || fail "Chưa có bản dành cho $PLATFORM"
+ARCHIVE_SHA256="$(json_get "$TMP/manifest.json" "files.$PLATFORM.sha256")"
+
+INSTALLED_VERSION=""
+if [ -f "$APP_DIR/version.json" ]; then
+  INSTALLED_VERSION="$(json_get "$APP_DIR/version.json" version || true)"
+fi
+
+if [ -n "$INSTALLED_VERSION" ]; then
+  # Từ đây là luồng cập nhật: đổi tên file log cho dễ tìm.
+  mv "$LOG" "$LOG_DIR/update-$STAMP.log"
+  LOG="$LOG_DIR/update-$STAMP.log"
+  log "Đang cài bản $INSTALLED_VERSION; bản mới nhất là $TARGET_VERSION"
+else
+  log "Cài mới bản $TARGET_VERSION ($PLATFORM)"
+fi
+
+# ---------- helpers ----------
+configured_port() {
+  if [ -f "$HOME_DIR/config.json" ]; then
+    plutil -extract port raw -o - "$HOME_DIR/config.json" 2> /dev/null || echo "$DEFAULT_PORT"
+  else
+    echo "$DEFAULT_PORT"
+  fi
+}
+
+write_plist() {
+  mkdir -p "$(dirname "$PLIST")"
+  cat > "$PLIST" << PLIST_EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$APP_DIR/runtime/node</string>
+    <string>$APP_DIR/server/dist/main.js</string>
+    <string>supervise</string>
+    <string>--data-dir</string><string>$HOME_DIR</string>
+    <string>--web-root</string><string>$APP_DIR/web</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$LOG_DIR/launchd.out.log</string>
+  <key>StandardErrorPath</key><string>$LOG_DIR/launchd.err.log</string>
+</dict>
+</plist>
+PLIST_EOF
+}
+
+agent_stop() { launchctl bootout "gui/$UID_NUM/$LABEL" > /dev/null 2>&1 || true; }
+agent_start() {
+  launchctl bootstrap "gui/$UID_NUM" "$PLIST" || fail "launchctl không đăng ký được dịch vụ"
+}
+
+is_healthy() { curl -fsS "http://127.0.0.1:$1/api/health" > /dev/null 2>&1; }
+
+wait_healthy() {
+  local port="$1" waited=0
+  while [ "$waited" -lt "$HEALTH_TIMEOUT_SECONDS" ]; do
+    if is_healthy "$port"; then return 0; fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
+wait_stopped() {
+  local port="$1" waited=0
+  while [ "$waited" -lt 15 ]; do
+    if ! is_healthy "$port"; then return 0; fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
+# ---------- 2. đã mới nhất? ----------
+if [ "$INSTALLED_VERSION" = "$TARGET_VERSION" ]; then
+  PORT="$(configured_port)"
+  if is_healthy "$PORT"; then
+    log "Đã là bản mới nhất ($TARGET_VERSION) và đang chạy."
+    exit 0
+  fi
+  log "Đã là bản mới nhất nhưng chưa chạy, đang khởi động lại dịch vụ..."
+  agent_stop
+  write_plist
+  agent_start
+  wait_healthy "$PORT" || fail "Dịch vụ không khởi động được"
+  log "Đã chạy tại http://localhost:$PORT"
+  exit 0
+fi
+
+# ---------- 3. tải và kiểm gói ----------
+log "Đang tải gói $TARGET_VERSION..."
+curl -fSL "$ARCHIVE_URL" -o "$TMP/package.tar.gz" || fail "Không tải được gói từ $ARCHIVE_URL"
+ACTUAL_SHA256="$(shasum -a 256 "$TMP/package.tar.gz" | awk '{print $1}')"
+[ "$ACTUAL_SHA256" = "$ARCHIVE_SHA256" ] || fail "Mã sha256 của gói không khớp (gói bị hỏng hoặc bị thay)."
+
+mkdir -p "$TMP/extract"
+tar -xzf "$TMP/package.tar.gz" -C "$TMP/extract" || fail "Giải nén gói thất bại"
+NEW_APP="$TMP/extract/qlcn-$TARGET_VERSION-$PLATFORM"
+[ -x "$NEW_APP/runtime/node" ] || fail "Gói không hợp lệ (thiếu runtime)"
+
+# ---------- 4a. cài mới ----------
+if [ -z "$INSTALLED_VERSION" ]; then
+  PORT="$DEFAULT_PORT"
+  if lsof -iTCP:"$PORT" -sTCP:LISTEN > /dev/null 2>&1; then
+    fail "Cổng $PORT đang bị chương trình khác dùng. Chạy lại với QLCN_PORT=<cổng khác>."
+  fi
+
+  mkdir -p "$HOME_DIR"
+  mv "$NEW_APP" "$APP_DIR"
+  printf '{ "port": %s }\n' "$PORT" > "$HOME_DIR/config.json"
+
+  ADMIN_USERNAME="${QLCN_ADMIN_USERNAME:-}"
+  ADMIN_PASSWORD="${QLCN_ADMIN_PASSWORD:-}"
+  if [ -z "$ADMIN_USERNAME" ]; then
+    read -r -p "Tên đăng nhập của chủ cửa hàng: " ADMIN_USERNAME < /dev/tty
+  fi
+  if [ -z "$ADMIN_PASSWORD" ]; then
+    read -r -s -p "Đặt mật khẩu: " ADMIN_PASSWORD < /dev/tty
+    echo
+    read -r -s -p "Nhập lại mật khẩu: " ADMIN_PASSWORD_AGAIN < /dev/tty
+    echo
+    [ "$ADMIN_PASSWORD" = "$ADMIN_PASSWORD_AGAIN" ] || fail "Hai mật khẩu không khớp"
+  fi
+
+  log "Đang tạo cơ sở dữ liệu và tài khoản..."
+  # Mật khẩu đi qua stdin, không nằm trên dòng lệnh.
+  printf '%s\n' "$ADMIN_PASSWORD" | "$APP_DIR/runtime/node" "$APP_DIR/server/dist/main.js" init-admin \
+    --data-dir "$HOME_DIR" --username "$ADMIN_USERNAME" --password-stdin >> "$LOG" 2>&1 \
+    || fail "Không tạo được tài khoản"
+
+  write_plist
+  agent_stop
+  agent_start
+  wait_healthy "$PORT" || fail "Dịch vụ không khởi động được trong $HEALTH_TIMEOUT_SECONDS giây (xem $LOG_DIR)"
+
+  log "Cài đặt xong. Ứng dụng chạy tại http://localhost:$PORT"
+  if [ -z "${QLCN_NO_OPEN:-}" ]; then open "http://localhost:$PORT" || true; fi
+  exit 0
+fi
+
+# ---------- 4b. cập nhật ----------
+PORT="$(configured_port)"
+OLD_NODE="$APP_DIR/runtime/node"
+OLD_MAIN="$APP_DIR/server/dist/main.js"
+BACKUP_FILE=""
+
+rollback() {
+  log "Bản mới không chạy được, đang quay lại bản cũ $INSTALLED_VERSION..."
+  agent_stop
+  wait_stopped "$PORT" || true
+  rm -rf "$APP_DIR"
+  mv "$PREV_DIR" "$APP_DIR"
+  if [ -n "$BACKUP_FILE" ]; then
+    # Bản mới có thể đã nâng cấu trúc dữ liệu; trả dữ liệu về đúng lúc trước khi cập nhật.
+    "$APP_DIR/runtime/node" "$APP_DIR/server/dist/main.js" restore "$BACKUP_FILE" \
+      --data-dir "$HOME_DIR" >> "$LOG" 2>&1 || log "Cảnh báo: không khôi phục được dữ liệu từ $BACKUP_FILE"
+  fi
+  write_plist
+  agent_start
+  if wait_healthy "$PORT"; then
+    log "Đã quay lại bản $INSTALLED_VERSION và đang chạy bình thường."
+  else
+    log "NGHIÊM TRỌNG: bản cũ cũng không chạy. Xem $LOG_DIR và gửi file chẩn đoán cho hỗ trợ."
+  fi
+  exit 1
+}
+
+# Trước khi thay bản chạy, mọi lỗi đều chỉ cần bật lại bản cũ đang còn nguyên.
+abort_update() {
+  log "LỖI: $* — hủy cập nhật, bật lại bản cũ."
+  write_plist
+  agent_start || true
+  exit 1
+}
+
+log "Dừng dịch vụ để cập nhật..."
+agent_stop
+wait_stopped "$PORT" || log "Cảnh báo: dịch vụ chưa dừng hẳn"
+
+log "Sao lưu dữ liệu trước khi cập nhật..."
+BACKUP_OUTPUT="$("$OLD_NODE" "$OLD_MAIN" backup --trigger pre-update --data-dir "$HOME_DIR" 2>> "$LOG")" \
+  || abort_update "Không sao lưu được dữ liệu"
+BACKUP_FILE="$(printf '%s\n' "$BACKUP_OUTPUT" | grep '^BACKUP_FILE=' | tail -1 | cut -d= -f2-)"
+[ -n "$BACKUP_FILE" ] || abort_update "Không xác định được file sao lưu"
+log "Đã sao lưu: $BACKUP_FILE"
+
+rm -rf "$PREV_DIR"
+mv "$APP_DIR" "$PREV_DIR"
+mv "$NEW_APP" "$APP_DIR"
+
+log "Đang nâng cấp cấu trúc dữ liệu..."
+"$APP_DIR/runtime/node" "$APP_DIR/server/dist/main.js" migrate --data-dir "$HOME_DIR" >> "$LOG" 2>&1 || rollback
+
+write_plist
+agent_start
+if ! wait_healthy "$PORT"; then rollback; fi
+
+log "Đã cập nhật lên $TARGET_VERSION (bản cũ giữ ở $PREV_DIR). Ứng dụng chạy tại http://localhost:$PORT"

@@ -1,0 +1,321 @@
+# Quản lý công nợ — cài đặt / cập nhật trên Windows.
+#
+#   irm __BASE_URL__/install.ps1 | iex        (mở PowerShell bằng "Run as administrator")
+#
+# Chạy lại đúng lệnh này để cập nhật. An toàn khi chạy nhiều lần:
+#   - lần đầu: tải gói, kiểm chữ ký + sha256, tạo tài khoản chủ cửa hàng, đăng ký chạy nền;
+#   - lần sau: nếu có bản mới thì sao lưu dữ liệu, thay bản chạy, kiểm tra sức khỏe,
+#     và TỰ QUAY LẠI bản cũ (cùng dữ liệu cũ) nếu bản mới không chạy được.
+#
+# Biến môi trường (chủ yếu để thử nghiệm): QLCN_BASE_URL, QLCN_APP_ROOT, QLCN_HOME, QLCN_TASK,
+# QLCN_PORT, QLCN_ADMIN_USERNAME, QLCN_ADMIN_PASSWORD, QLCN_NO_OPEN.
+#
+# CHÚ Ý: script này mới được viết, chưa chạy thử trên máy Windows thật.
+
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+$BaseUrl = if ($env:QLCN_BASE_URL) { $env:QLCN_BASE_URL } else { '__BASE_URL__' }
+$AppRoot = if ($env:QLCN_APP_ROOT) { $env:QLCN_APP_ROOT } else { Join-Path $env:ProgramFiles 'QuanLyCongNo' }
+$DataRoot = if ($env:QLCN_HOME) { $env:QLCN_HOME } else { Join-Path $env:ProgramData 'QuanLyCongNo' }
+$TaskName = if ($env:QLCN_TASK) { $env:QLCN_TASK } else { 'QuanLyCongNo' }
+$DefaultPort = if ($env:QLCN_PORT) { [int]$env:QLCN_PORT } else { 8686 }
+$HealthTimeoutSeconds = 30
+
+# Khóa công khai (X||Y, base64) dùng để kiểm chữ ký manifest: khóa chính + khóa dự phòng.
+$PublicKeysRaw = @(__PUBLIC_KEYS_RAW__)
+
+$AppDir = Join-Path $AppRoot 'app'
+$PrevDir = Join-Path $AppRoot 'app.prev'
+$LogDir = Join-Path $DataRoot 'logs'
+$Stamp = Get-Date -Format 'yyyyMMddTHHmmss'
+$Platform = 'win-x64'
+
+New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+$Script:LogFile = Join-Path $LogDir "install-$Stamp.log"
+
+function Write-Log([string]$Message) {
+  $line = '[{0}] {1}' -f (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'), $Message
+  Write-Host $line
+  Add-Content -Path $Script:LogFile -Value $line -Encoding UTF8
+}
+
+function Stop-Install([string]$Message) {
+  Write-Log "LỖI: $Message"
+  Write-Log "Chi tiết ở: $Script:LogFile"
+  throw $Message
+}
+
+$identity = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+if (-not $identity.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+  Stop-Install 'Cần quyền Administrator. Hãy mở PowerShell bằng "Run as administrator" rồi chạy lại.'
+}
+if (-not [Environment]::Is64BitOperatingSystem) { Stop-Install 'Chỉ hỗ trợ Windows 64-bit.' }
+
+function Test-ManifestSignature([byte[]]$Data, [byte[]]$Signature) {
+  foreach ($b64 in $PublicKeysRaw) {
+    $raw = [Convert]::FromBase64String($b64)
+    # CNG blob của khóa công khai ECDSA P-256: magic 'ECS1', độ dài 32, rồi X và Y.
+    $blob = New-Object byte[] 72
+    [BitConverter]::GetBytes([uint32]0x31534345).CopyTo($blob, 0)
+    [BitConverter]::GetBytes([uint32]32).CopyTo($blob, 4)
+    [Array]::Copy($raw, 0, $blob, 8, 64)
+    $key = [System.Security.Cryptography.CngKey]::Import($blob, [System.Security.Cryptography.CngKeyBlobFormat]::EccPublicBlob)
+    $ecdsa = New-Object System.Security.Cryptography.ECDsaCng($key)
+    $ecdsa.HashAlgorithm = [System.Security.Cryptography.CngAlgorithm]::Sha256
+    if ($ecdsa.VerifyData($Data, $Signature)) { return $true }
+  }
+  return $false
+}
+
+function Test-Healthy([int]$Port) {
+  try {
+    $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port/api/health" -TimeoutSec 3
+    return $response.StatusCode -eq 200
+  } catch { return $false }
+}
+
+function Wait-Healthy([int]$Port) {
+  for ($waited = 0; $waited -lt $HealthTimeoutSeconds; $waited++) {
+    if (Test-Healthy $Port) { return $true }
+    Start-Sleep -Seconds 1
+  }
+  return $false
+}
+
+function Wait-Stopped([int]$Port) {
+  for ($waited = 0; $waited -lt 15; $waited++) {
+    if (-not (Test-Healthy $Port)) { return $true }
+    Start-Sleep -Seconds 1
+  }
+  return $false
+}
+
+function Get-ConfiguredPort {
+  $configPath = Join-Path $DataRoot 'config.json'
+  if (Test-Path $configPath) {
+    try {
+      $config = Get-Content $configPath -Raw | ConvertFrom-Json
+      if ($config.port) { return [int]$config.port }
+    } catch { }
+  }
+  return $DefaultPort
+}
+
+function Register-ServerTask {
+  $node = Join-Path $AppDir 'runtime\node.exe'
+  $main = Join-Path $AppDir 'server\dist\main.js'
+  $web = Join-Path $AppDir 'web'
+  $arguments = "`"$main`" supervise --data-dir `"$DataRoot`" --web-root `"$web`""
+  # Chạy khi khởi động máy, dưới LocalService, không giới hạn thời gian, không phụ thuộc pin.
+  $xml = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/Task">
+  <RegistrationInfo><Description>Quản lý công nợ</Description></RegistrationInfo>
+  <Triggers><BootTrigger><Enabled>true</Enabled></BootTrigger></Triggers>
+  <Principals>
+    <Principal id="Service">
+      <UserId>S-1-5-19</UserId>
+      <LogonType>ServiceAccount</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>true</Hidden>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Service">
+    <Exec>
+      <Command>$node</Command>
+      <Arguments>$arguments</Arguments>
+      <WorkingDirectory>$DataRoot</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+"@
+  $xmlPath = Join-Path ([IO.Path]::GetTempPath()) "qlcn-task-$Stamp.xml"
+  [IO.File]::WriteAllText($xmlPath, $xml, [Text.Encoding]::Unicode)
+  & schtasks.exe /Create /TN $TaskName /XML $xmlPath /F | Out-Null
+  Remove-Item $xmlPath -Force
+  if ($LASTEXITCODE -ne 0) { Stop-Install 'Không đăng ký được tác vụ chạy nền (schtasks).' }
+}
+
+function Stop-ServerTask {
+  & schtasks.exe /End /TN $TaskName 2>$null | Out-Null
+  # Phòng khi tiến trình con còn sót lại: dừng mọi node.exe chạy từ thư mục ứng dụng.
+  Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($AppRoot, [StringComparison]::OrdinalIgnoreCase) } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
+
+function Start-ServerTask {
+  & schtasks.exe /Run /TN $TaskName | Out-Null
+  if ($LASTEXITCODE -ne 0) { Stop-Install 'Không khởi động được tác vụ chạy nền.' }
+}
+
+function Invoke-Qlcn([string]$AppPath, [string[]]$Arguments, [string]$StdIn) {
+  $node = Join-Path $AppPath 'runtime\node.exe'
+  $main = Join-Path $AppPath 'server\dist\main.js'
+  if ($StdIn) { $output = $StdIn | & $node $main @Arguments 2>&1 } else { $output = & $node $main @Arguments 2>&1 }
+  $output | ForEach-Object { Add-Content -Path $Script:LogFile -Value $_ -Encoding UTF8 }
+  return @{ ExitCode = $LASTEXITCODE; Output = $output }
+}
+
+# ---------- 1. manifest + chữ ký ----------
+Write-Log 'Đang tải thông tin phiên bản...'
+$tmp = Join-Path ([IO.Path]::GetTempPath()) "qlcn-$Stamp"
+New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+try {
+  $manifestPath = Join-Path $tmp 'manifest.json'
+  Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/manifest.json" -OutFile $manifestPath
+  $signature = [Convert]::FromBase64String(([Text.Encoding]::UTF8.GetString((Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/manifest.sig").Content)).Trim())
+  if (-not (Test-ManifestSignature ([IO.File]::ReadAllBytes($manifestPath)) $signature)) {
+    Stop-Install 'Chữ ký của manifest KHÔNG hợp lệ. Dừng để đảm bảo an toàn.'
+  }
+  $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+  $target = $manifest.version
+  $file = $manifest.files.$Platform
+  if (-not $file) { Stop-Install "Chưa có bản dành cho $Platform" }
+
+  $installed = $null
+  $versionFile = Join-Path $AppDir 'version.json'
+  if (Test-Path $versionFile) { $installed = (Get-Content $versionFile -Raw | ConvertFrom-Json).version }
+
+  if ($installed) {
+    $updateLog = Join-Path $LogDir "update-$Stamp.log"
+    Move-Item $Script:LogFile $updateLog -Force
+    $Script:LogFile = $updateLog
+    Write-Log "Đang cài bản $installed; bản mới nhất là $target"
+  } else {
+    Write-Log "Cài mới bản $target ($Platform)"
+  }
+
+  $port = Get-ConfiguredPort
+
+  # ---------- 2. đã mới nhất? ----------
+  if ($installed -eq $target) {
+    if (Test-Healthy $port) { Write-Log "Đã là bản mới nhất ($target) và đang chạy."; return }
+    Write-Log 'Đã là bản mới nhất nhưng chưa chạy, đang khởi động dịch vụ...'
+    Register-ServerTask
+    Start-ServerTask
+    if (-not (Wait-Healthy $port)) { Stop-Install 'Dịch vụ không khởi động được' }
+    Write-Log "Đã chạy tại http://localhost:$port"
+    return
+  }
+
+  # ---------- 3. tải và kiểm gói ----------
+  Write-Log "Đang tải gói $target..."
+  $archive = Join-Path $tmp 'package.tar.gz'
+  Invoke-WebRequest -UseBasicParsing -Uri $file.url -OutFile $archive
+  $actual = (Get-FileHash -Algorithm SHA256 -Path $archive).Hash.ToLower()
+  if ($actual -ne $file.sha256) { Stop-Install 'Mã sha256 của gói không khớp (gói bị hỏng hoặc bị thay).' }
+
+  $extract = Join-Path $tmp 'extract'
+  New-Item -ItemType Directory -Force -Path $extract | Out-Null
+  & tar.exe -xzf $archive -C $extract
+  if ($LASTEXITCODE -ne 0) { Stop-Install 'Giải nén gói thất bại (cần Windows 10 trở lên có tar.exe).' }
+  $newApp = Join-Path $extract "qlcn-$target-$Platform"
+  if (-not (Test-Path (Join-Path $newApp 'runtime\node.exe'))) { Stop-Install 'Gói không hợp lệ (thiếu runtime).' }
+
+  # ---------- 4a. cài mới ----------
+  if (-not $installed) {
+    $port = $DefaultPort
+    if (Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue) {
+      Stop-Install "Cổng $port đang bị chương trình khác dùng. Đặt biến QLCN_PORT sang cổng khác rồi chạy lại."
+    }
+
+    New-Item -ItemType Directory -Force -Path $AppRoot, $DataRoot | Out-Null
+    Move-Item $newApp $AppDir
+    Set-Content -Path (Join-Path $DataRoot 'config.json') -Value "{ `"port`": $port }" -Encoding ASCII
+    # Dịch vụ chạy dưới LocalService nên cần quyền ghi vào thư mục dữ liệu.
+    & icacls.exe $DataRoot /grant 'NT AUTHORITY\LocalService:(OI)(CI)M' /T | Out-Null
+
+    $username = $env:QLCN_ADMIN_USERNAME
+    $password = $env:QLCN_ADMIN_PASSWORD
+    if (-not $username) { $username = Read-Host 'Tên đăng nhập của chủ cửa hàng' }
+    if (-not $password) {
+      $first = Read-Host 'Đặt mật khẩu' -AsSecureString
+      $second = Read-Host 'Nhập lại mật khẩu' -AsSecureString
+      $a = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($first))
+      $b = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($second))
+      if ($a -ne $b) { Stop-Install 'Hai mật khẩu không khớp' }
+      $password = $a
+    }
+
+    Write-Log 'Đang tạo cơ sở dữ liệu và tài khoản...'
+    # Mật khẩu đi qua stdin, không nằm trên dòng lệnh.
+    $result = Invoke-Qlcn $AppDir @('init-admin', '--data-dir', $DataRoot, '--username', $username, '--password-stdin') $password
+    if ($result.ExitCode -ne 0) { Stop-Install 'Không tạo được tài khoản' }
+    & icacls.exe $DataRoot /grant 'NT AUTHORITY\LocalService:(OI)(CI)M' /T | Out-Null
+
+    Register-ServerTask
+    Start-ServerTask
+    if (-not (Wait-Healthy $port)) { Stop-Install "Dịch vụ không khởi động được trong $HealthTimeoutSeconds giây (xem $LogDir)" }
+
+    Write-Log "Cài đặt xong. Ứng dụng chạy tại http://localhost:$port"
+    if (-not $env:QLCN_NO_OPEN) { Start-Process "http://localhost:$port" }
+    return
+  }
+
+  # ---------- 4b. cập nhật ----------
+  $script:backupFile = $null
+
+  function Invoke-Rollback {
+    Write-Log "Bản mới không chạy được, đang quay lại bản cũ $installed..."
+    Stop-ServerTask
+    Wait-Stopped $port | Out-Null
+    if (Test-Path $AppDir) { Remove-Item $AppDir -Recurse -Force }
+    Move-Item $PrevDir $AppDir
+    if ($script:backupFile) {
+      # Bản mới có thể đã nâng cấu trúc dữ liệu; trả dữ liệu về đúng lúc trước khi cập nhật.
+      $restore = Invoke-Qlcn $AppDir @('restore', $script:backupFile, '--data-dir', $DataRoot) $null
+      if ($restore.ExitCode -ne 0) { Write-Log "Cảnh báo: không khôi phục được dữ liệu từ $($script:backupFile)" }
+    }
+    Register-ServerTask
+    Start-ServerTask
+    if (Wait-Healthy $port) { Write-Log "Đã quay lại bản $installed và đang chạy bình thường." }
+    else { Write-Log "NGHIÊM TRỌNG: bản cũ cũng không chạy. Xem $LogDir và gửi file chẩn đoán cho hỗ trợ." }
+    throw 'Cập nhật thất bại, đã quay lại bản cũ'
+  }
+
+  Write-Log 'Dừng dịch vụ để cập nhật...'
+  Stop-ServerTask
+  if (-not (Wait-Stopped $port)) { Write-Log 'Cảnh báo: dịch vụ chưa dừng hẳn' }
+
+  Write-Log 'Sao lưu dữ liệu trước khi cập nhật...'
+  $backup = Invoke-Qlcn $AppDir @('backup', '--trigger', 'pre-update', '--data-dir', $DataRoot) $null
+  $line = $backup.Output | Where-Object { "$_" -like 'BACKUP_FILE=*' } | Select-Object -Last 1
+  if ($backup.ExitCode -ne 0 -or -not $line) {
+    Write-Log 'LỖI: Không sao lưu được dữ liệu — hủy cập nhật, bật lại bản cũ.'
+    Start-ServerTask
+    throw 'Không sao lưu được dữ liệu'
+  }
+  $script:backupFile = ("$line").Substring('BACKUP_FILE='.Length)
+  Write-Log "Đã sao lưu: $($script:backupFile)"
+
+  if (Test-Path $PrevDir) { Remove-Item $PrevDir -Recurse -Force }
+  Move-Item $AppDir $PrevDir
+  Move-Item $newApp $AppDir
+
+  Write-Log 'Đang nâng cấp cấu trúc dữ liệu...'
+  $migrate = Invoke-Qlcn $AppDir @('migrate', '--data-dir', $DataRoot) $null
+  if ($migrate.ExitCode -ne 0) { Invoke-Rollback }
+
+  Register-ServerTask
+  Start-ServerTask
+  if (-not (Wait-Healthy $port)) { Invoke-Rollback }
+
+  Write-Log "Đã cập nhật lên $target (bản cũ giữ ở $PrevDir). Ứng dụng chạy tại http://localhost:$port"
+} finally {
+  Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+}
