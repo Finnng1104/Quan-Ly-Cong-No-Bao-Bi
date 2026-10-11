@@ -1,0 +1,6 @@
+node_modules
+dist
+# Local dev data (SQLite file, logs, backups) must never be committed
+.data
+*.log
+release
