@@ -123,6 +123,21 @@ write_plist() {
 </dict>
 </plist>
 PLIST_EOF
+  # `qlcn` điều khiển đúng dịch vụ này, nên ghi cùng lúc với plist (mọi nhánh cài/cập nhật/quay lại).
+  install_support_command
+}
+
+# Lệnh hỗ trợ `qlcn` (nằm trong gói) cần biết tên dịch vụ; đưa nó lên PATH nếu không cần sudo.
+install_support_command() {
+  printf 'LABEL=%q\nPLIST=%q\n' "$LABEL" "$PLIST" > "$HOME_DIR/install.env"
+  [ -x "$APP_DIR/bin/qlcn" ] || return 0
+  # Bản thử (QLCN_LABEL khác mặc định) không được chiếm lệnh `qlcn` của bản thật.
+  if [ "$LABEL" = vn.qlcn.server ] && [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
+    ln -sf "$APP_DIR/bin/qlcn" /usr/local/bin/qlcn
+    log "Lệnh hỗ trợ: qlcn"
+  else
+    log "Lệnh hỗ trợ: \"$APP_DIR/bin/qlcn\""
+  fi
 }
 
 agent_stop() { launchctl bootout "gui/$UID_NUM/$LABEL" > /dev/null 2>&1 || true; }

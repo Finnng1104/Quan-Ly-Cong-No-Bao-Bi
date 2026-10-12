@@ -1,6 +1,6 @@
 # Tình trạng dự án và việc tồn đọng
 
-Cập nhật: 2026-10-12 · Branch: `feat/backend` (chưa push, chưa merge vào `main`)
+Cập nhật: 2026-10-12 (chiều) · Branch: `feat/backend` (chưa push, chưa merge vào `main`)
 
 Tài liệu thiết kế đầy đủ: `server/PLAN.md`. Cách phát hành bản cài: `server/packaging/README.md`.
 
@@ -53,9 +53,9 @@ Windows sạch (nếu khách dùng Windows) và thí điểm 1–2 tuần — đ
 ### A. Cần bạn cung cấp / quyết định (mai làm)
 | # | Việc | Dùng cho |
 |---|---|---|
-| A1 | Tạo khóa ký: `node server/packaging/manifest.mjs keygen main` và `keygen backup`; giữ private key ngoài repo, commit 2 file `*.public.pem` vào `server/packaging/public-keys/` | Phát hành |
+| ~~A1~~ | ~~Tạo khóa ký~~ — **xong 2026-10-12**: private key ở `~/qlcn-signing-keys/` (máy Finn, cần cất offline), public key đã commit | Phát hành |
 | A2 | Chọn nơi đặt file phát hành (bucket R2 công khai riêng hoặc GitHub Releases của repo riêng) + domain | Link cài đặt khách chạy |
-| A3 | Repo GitHub + secret `QLCN_SIGNING_KEY` + biến `QLCN_RELEASE_BASE_URL` | CI build 3 nền tảng |
+| A3 | Repo GitHub **riêng của Finn** (Finn không có quyền repo `LofizDev`) + secret `QLCN_SIGNING_KEY` + biến `QLCN_RELEASE_BASE_URL`. Khách dùng Mac chip M thì build tay trên máy Finn được, không cần CI | CI build Windows / Mac Intel |
 | A4 | Tài khoản R2: endpoint, bucket **mỗi shop một bucket**, token chỉ quyền trên bucket đó | Backup cloud |
 | A5 | Khách dùng Windows hay macOS, ai cài/cập nhật, cổng mong muốn (mặc định 8686) | Chọn việc ưu tiên |
 | A6 | Tên đăng nhập chủ shop và tên cửa hàng | Cài đặt |
@@ -63,7 +63,7 @@ Windows sạch (nếu khách dùng Windows) và thí điểm 1–2 tuần — đ
 ### B. Cần kiểm chứng thật (mình chưa làm được)
 | # | Việc | Ghi chú |
 |---|---|---|
-| B1 | Chạy `install.ps1` trên Windows sạch (VM): cài, cập nhật, quay lại bản cũ | **Rủi ro lớn nhất**; kiểm Task Scheduler + `LocalService` + antivirus |
+| B1 | Chạy `install.ps1` và `qlcn.ps1` trên Windows sạch (VM): cài, cập nhật, quay lại bản cũ, `qlcn restore` | **Rủi ro lớn nhất**; kiểm Task Scheduler + `LocalService` + antivirus |
 | B2 | Tắt/bật lại máy, rút sạc laptop: dịch vụ có tự chạy lại không | Yêu cầu "chạy ổn định" |
 | B3 | Backup lên R2 thật rồi khôi phục từ file đó | Mới chứng minh chữ ký đúng |
 | B4 | Build + thử trên Mac Intel (x64) và chạy workflow CI | Chưa chạy lần nào |
@@ -74,9 +74,9 @@ Windows sạch (nếu khách dùng Windows) và thí điểm 1–2 tuần — đ
 | # | Việc |
 |---|---|
 | C1 | Hướng dẫn sử dụng cho chủ shop (cài, đăng nhập, backup, khi lỗi làm gì) — có skill `client-howto-guide` |
-| C2 | Lệnh ngắn cho chẩn đoán/khôi phục (hiện phải gọi `node main.js doctor/restore ...`); nên có wrapper `qlcn` |
+| ~~C2~~ | ~~Lệnh `qlcn`~~ — **xong**: status/start/stop/backup/backups/restore/doctor/logs, đã thử thật trên macOS; bản Windows chưa chạy thật |
 | C3 | Dải "có bản mới" trong giao diện + `/api/system/update-status` (app chưa kiểm chữ ký, chỉ installer kiểm) |
-| C4 | Nút khôi phục backup trong Cài đặt (hiện chỉ CLI) |
+| C4 | Nút khôi phục backup trong Cài đặt — **PLAN đã chốt không làm** ("API backup/chẩn đoán qua web: dùng CLI"); chỉ làm nếu Finn đổi quyết định |
 | C5 | Xuất sao kê PDF/Excel thật — hiện chỉ ghi nhận lần xuất (đúng phạm vi D-01, nhưng khách có thể mong có file) |
 | C6 | Test tự động cho giao diện (hiện chỉ test logic + bấm tay) |
 

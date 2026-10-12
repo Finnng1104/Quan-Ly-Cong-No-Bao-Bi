@@ -148,6 +148,32 @@ function Register-ServerTask {
   & schtasks.exe /Create /TN $TaskName /XML $xmlPath /F | Out-Null
   Remove-Item $xmlPath -Force
   if ($LASTEXITCODE -ne 0) { Stop-Install 'Không đăng ký được tác vụ chạy nền (schtasks).' }
+  Install-SupportCommand
+}
+
+# Lệnh hỗ trợ `qlcn` (nằm trong gói) cần biết thư mục dữ liệu và tên tác vụ; đưa nó lên PATH của máy.
+function Install-SupportCommand {
+  @{ dataRoot = $DataRoot; taskName = $TaskName } | ConvertTo-Json |
+    Set-Content -Path (Join-Path $AppRoot 'install.json') -Encoding UTF8
+  $binDir = Join-Path $AppDir 'bin'
+  if (-not (Test-Path (Join-Path $binDir 'qlcn.cmd'))) { return }
+  # Bản thử (QLCN_TASK khác mặc định) không được chiếm lệnh `qlcn` của bản thật.
+  if ($TaskName -ne 'QuanLyCongNo') { Write-Log "Lệnh hỗ trợ: `"$binDir\qlcn.cmd`""; return }
+  # Đọc/ghi registry trực tiếp: [Environment]::SetEnvironmentVariable('Path', ..., 'Machine') sẽ biến
+  # các mục %SystemRoot%... thành đường dẫn cứng và đổi kiểu giá trị sang REG_SZ.
+  $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Control\Session Manager\Environment', $true)
+  try {
+    $raw = $key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    $entries = @($raw -split ';' | Where-Object { $_ })
+    if ($entries -notcontains $binDir) {
+      $key.SetValue('Path', (($entries + $binDir) -join ';'), [Microsoft.Win32.RegistryValueKind]::ExpandString)
+      # Ghi một biến qua API này để Windows báo cho các cửa sổ mới biết PATH đã đổi (WM_SETTINGCHANGE).
+      [Environment]::SetEnvironmentVariable('QLCN_INSTALL_DIR', $AppRoot, 'Machine')
+    }
+  } finally {
+    $key.Close()
+  }
+  Write-Log 'Lệnh hỗ trợ: qlcn (mở cửa sổ PowerShell mới để dùng)'
 }
 
 function Stop-ServerTask {

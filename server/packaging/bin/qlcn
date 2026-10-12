@@ -1,0 +1,176 @@
+#!/bin/bash
+# qlcn — lệnh hỗ trợ cho bản cài trên macOS (người hỗ trợ dùng, không phải chủ cửa hàng).
+#
+# Nằm trong gói cài tại <thư mục dữ liệu>/app/bin/qlcn. Installer ghi <thư mục dữ liệu>/install.env
+# (LABEL, PLIST) để lệnh này biết dịch vụ chạy nền tên gì; mọi thứ khác suy ra từ vị trí của file.
+
+set -euo pipefail
+
+# Follow the /usr/local/bin symlink back to the real file (`readlink -f` is missing before macOS 12.3).
+script="${BASH_SOURCE[0]}"
+while [ -L "$script" ]; do
+  target="$(readlink "$script")"
+  case "$target" in
+    /*) script="$target" ;;
+    *) script="$(dirname "$script")/$target" ;;
+  esac
+done
+BIN_DIR="$(cd "$(dirname "$script")" && pwd)"
+APP_DIR="$(dirname "$BIN_DIR")"
+DATA_DIR="$(dirname "$APP_DIR")"
+NODE="$APP_DIR/runtime/node"
+MAIN="$APP_DIR/server/dist/main.js"
+INSTALL_ENV="$DATA_DIR/install.env"
+UID_NUM="$(id -u)"
+
+LABEL=""
+PLIST=""
+# shellcheck source=/dev/null
+[ -f "$INSTALL_ENV" ] && . "$INSTALL_ENV"
+LABEL="${LABEL:-vn.qlcn.server}"
+PLIST="${PLIST:-$HOME/Library/LaunchAgents/$LABEL.plist}"
+
+usage() {
+  cat << 'USAGE'
+Cách dùng: qlcn <lệnh>
+
+  status              Phiên bản, cổng, tình trạng dịch vụ và bản sao lưu gần nhất
+  start | stop | restart
+                      Bật / tắt / khởi động lại dịch vụ chạy nền
+  backup              Sao lưu ngay (dịch vụ vẫn chạy bình thường)
+  backups             Liệt kê các bản sao lưu trên máy
+  restore <file|ngày> Thay dữ liệu bằng một bản sao lưu (ngày dạng YYYY-MM-DD = bản mới nhất ngày đó).
+                      Tự tắt dịch vụ, chụp lại dữ liệu hiện tại, khôi phục rồi bật lại.
+                      Thêm --yes để bỏ qua câu hỏi xác nhận.
+  doctor              Tạo file chẩn đoán (không chứa dữ liệu khách) để gửi hỗ trợ
+  logs                Mở thư mục log
+  version             In phiên bản
+USAGE
+}
+
+run_main() { "$NODE" "$MAIN" "$@" --data-dir "$DATA_DIR"; }
+
+port() {
+  plutil -extract port raw -o - "$DATA_DIR/config.json" 2> /dev/null || echo 8686
+}
+
+is_healthy() { curl -fsS --max-time 3 "http://127.0.0.1:$(port)/api/health" > /dev/null 2>&1; }
+
+wait_until() {
+  # $1 = "up" | "down", $2 = seconds
+  local waited=0
+  while [ "$waited" -lt "$2" ]; do
+    if [ "$1" = up ] && is_healthy; then return 0; fi
+    if [ "$1" = down ] && ! is_healthy; then return 0; fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
+service_stop() {
+  launchctl bootout "gui/$UID_NUM/$LABEL" > /dev/null 2>&1 || true
+  wait_until down 15 || echo "Cảnh báo: dịch vụ chưa dừng hẳn sau 15 giây" >&2
+}
+
+service_start() {
+  [ -f "$PLIST" ] || { echo "Không thấy $PLIST — chạy lại lệnh cài đặt để đăng ký dịch vụ." >&2; return 1; }
+  if ! launchctl print "gui/$UID_NUM/$LABEL" > /dev/null 2>&1; then
+    launchctl bootstrap "gui/$UID_NUM" "$PLIST"
+  fi
+  if wait_until up 30; then
+    echo "Dịch vụ đang chạy tại http://localhost:$(port)"
+  else
+    echo "Dịch vụ không lên được sau 30 giây. Xem log: qlcn logs" >&2
+    return 1
+  fi
+}
+
+cmd_status() {
+  echo "Phiên bản : $(run_main version 2> /dev/null || echo '?')"
+  echo "Dữ liệu   : $DATA_DIR"
+  echo "Cổng      : $(port)"
+  if launchctl print "gui/$UID_NUM/$LABEL" > /dev/null 2>&1; then
+    echo "Dịch vụ   : đã đăng ký ($LABEL)"
+  else
+    echo "Dịch vụ   : CHƯA đăng ký"
+  fi
+  local health
+  if health="$(curl -fsS --max-time 3 "http://127.0.0.1:$(port)/api/health" 2> /dev/null)"; then
+    echo "Sức khỏe  : $health"
+  else
+    echo "Sức khỏe  : KHÔNG phản hồi"
+  fi
+}
+
+cmd_backups() {
+  local dir="$DATA_DIR/backups"
+  if ! ls "$dir"/qlcn-*.db.gz > /dev/null 2>&1; then
+    echo "Chưa có bản sao lưu nào trong $dir"
+    return 0
+  fi
+  echo "Trong $dir (cũ → mới):"
+  # Tên file bắt đầu bằng thời điểm UTC nên sắp theo tên là sắp theo thời gian.
+  for file in "$dir"/qlcn-*.db.gz; do
+    printf '  %-55s %8s\n' "$(basename "$file")" "$(du -h "$file" | cut -f1)"
+  done
+}
+
+cmd_restore() {
+  local source="" assume_yes=no
+  for arg in "$@"; do
+    case "$arg" in
+      --yes) assume_yes=yes ;;
+      *) source="$arg" ;;
+    esac
+  done
+  [ -n "$source" ] || { echo "Cần chỉ rõ file hoặc ngày. Xem danh sách: qlcn backups" >&2; return 2; }
+  # Tên file trần (lấy từ `qlcn backups`) được hiểu là file trong thư mục sao lưu.
+  if [ ! -e "$source" ] && [ -e "$DATA_DIR/backups/$source" ]; then source="$DATA_DIR/backups/$source"; fi
+
+  if [ "$assume_yes" != yes ]; then
+    echo "Sẽ THAY TOÀN BỘ dữ liệu hiện tại bằng: $source"
+    echo "(Dữ liệu hiện tại được chụp lại trước, nên vẫn quay lại được.)"
+    read -r -p "Tiếp tục? [y/N] " answer < /dev/tty
+    [ "$answer" = y ] || [ "$answer" = Y ] || { echo "Đã hủy."; return 1; }
+  fi
+
+  echo "Đang dừng dịch vụ..."
+  service_stop
+  local status=0
+  run_main restore "$source" || status=$?
+  # Bật lại dịch vụ dù khôi phục thành công hay không: thất bại thì dữ liệu cũ vẫn nguyên.
+  echo "Đang bật lại dịch vụ..."
+  service_start || status=1
+  if [ "$status" -ne 0 ]; then echo "Khôi phục KHÔNG thành công, dữ liệu hiện tại không bị thay đổi." >&2; fi
+  return "$status"
+}
+
+cmd_doctor() {
+  local output file
+  output="$(run_main doctor)"
+  echo "$output"
+  file="$(printf '%s\n' "$output" | sed -n 's/^Đã tạo file chẩn đoán: //p')"
+  [ -n "$file" ] && open -R "$file" 2> /dev/null || true
+}
+
+command="${1:-}"
+[ $# -gt 0 ] && shift
+case "$command" in
+  status) cmd_status ;;
+  start) service_start ;;
+  stop) service_stop && echo "Đã dừng dịch vụ." ;;
+  restart) service_stop && service_start ;;
+  backup) run_main backup ;;
+  backups) cmd_backups ;;
+  restore) cmd_restore "$@" ;;
+  doctor) cmd_doctor ;;
+  logs) open "$DATA_DIR/logs" ;;
+  version) run_main version ;;
+  "" | help | -h | --help) usage ;;
+  *)
+    echo "Không có lệnh \"$command\"." >&2
+    usage >&2
+    exit 2
+    ;;
+esac

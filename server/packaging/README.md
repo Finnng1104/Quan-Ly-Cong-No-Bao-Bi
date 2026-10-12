@@ -12,6 +12,25 @@ Windows  irm <BASE_URL>/install.ps1 | iex        (PowerShell mở bằng "Run as
 Chạy lại đúng lệnh đó để cập nhật. Script tự: kiểm chữ ký, tải gói, kiểm sha256, sao lưu dữ liệu, thay bản
 chạy, kiểm tra sức khỏe, và **quay lại bản cũ cùng dữ liệu cũ** nếu bản mới không chạy.
 
+## Lệnh hỗ trợ `qlcn` (dùng khi hỗ trợ từ xa)
+
+Có sẵn trong gói cài (`app/bin/`). Installer đưa lên PATH: Windows luôn (mở cửa sổ PowerShell mới),
+macOS chỉ khi `/usr/local/bin` ghi được không cần sudo — nếu không, installer in đường dẫn đầy đủ.
+
+```
+qlcn status                 phiên bản, cổng, dịch vụ, /api/health
+qlcn start | stop | restart dịch vụ chạy nền (Windows: PowerShell "Run as administrator")
+qlcn backup                 sao lưu ngay, dịch vụ vẫn chạy
+qlcn backups                liệt kê bản sao lưu trên máy
+qlcn restore <file|ngày>    tự dừng dịch vụ → khôi phục → bật lại; ngày theo giờ VN (YYYY-MM-DD)
+qlcn doctor                 tạo file chẩn đoán (không có dữ liệu khách) và mở thư mục chứa nó
+qlcn logs                   mở thư mục log
+```
+
+`restore` luôn chụp dữ liệu hiện tại thành `...-pre-restore.db.gz` trước, nên hoàn tác được bằng
+`qlcn restore <tên file pre-restore>`. Lưu ý: `restore <ngày>` lấy bản **mới nhất** của ngày đó, kể cả
+bản `pre-restore` — muốn chắc chắn thì chỉ rõ tên file lấy từ `qlcn backups`.
+
 ## Phát hành một bản
 
 1. Tạo khóa (một lần): `node packaging/manifest.mjs keygen main` và `... keygen backup`.
@@ -44,6 +63,7 @@ Gỡ bản thử: `launchctl bootout gui/$(id -u)/vn.qlcn.test` rồi xóa `~/Li
 |---|---|
 | macOS (arm64): cài mới, cập nhật 0.0.1→0.0.2, rollback khi bản mới hỏng, manifest bị sửa bị từ chối, chạy lại cùng bản không đổi gì, supervisor chạy lại khi tiến trình bị giết | Đã thử trên máy thật |
 | macOS Intel (x64) | Chưa (cần build trên máy Intel hoặc CI) |
-| Windows: `install.ps1`, Task Scheduler, `LocalService`, kiểm chữ ký bằng CNG | **Chưa chạy trên Windows thật** |
+| macOS: `qlcn` status/backup/backups/restore (theo tên file, theo ngày, file hỏng, hoàn tác) | Đã thử trên máy thật |
+| Windows: `install.ps1`, `qlcn.ps1`, Task Scheduler, `LocalService`, kiểm chữ ký bằng CNG | **Chưa chạy trên Windows thật** |
 | CI workflow | Chưa chạy (cần repo GitHub) |
 | Tự khởi động lại sau khi tắt/mở máy, rút sạc laptop | Chưa |

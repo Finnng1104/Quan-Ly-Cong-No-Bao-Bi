@@ -12,6 +12,7 @@
 //     runtime/node            the exact Node binary the native addon was built against
 //     server/dist, server/node_modules, server/package.json
 //     web/                    built web app, served by the server
+//     bin/qlcn[.cmd|.ps1]     support command (status, restore, doctor...)
 //     version.json
 //
 // Release archives are built per OS/arch (native addon), normally by CI.
@@ -95,6 +96,20 @@ fs.mkdirSync(runtimeDir, { recursive: true })
 const nodeName = process.platform === 'win32' ? 'node.exe' : 'node'
 fs.copyFileSync(process.execPath, path.join(runtimeDir, nodeName))
 fs.chmodSync(path.join(runtimeDir, nodeName), 0o755)
+
+// 4b. support command (`qlcn status|restore|doctor...`), for this platform only
+const binSource = path.join(serverDir, 'packaging', 'bin')
+const binStage = path.join(stageDir, 'bin')
+fs.mkdirSync(binStage, { recursive: true })
+if (process.platform === 'win32') {
+  fs.copyFileSync(path.join(binSource, 'qlcn.cmd'), path.join(binStage, 'qlcn.cmd'))
+  // Windows PowerShell 5.1 reads a BOM-less script as ANSI, which garbles the Vietnamese messages.
+  const script = fs.readFileSync(path.join(binSource, 'qlcn.ps1'), 'utf8').replace(/^﻿/, '')
+  fs.writeFileSync(path.join(binStage, 'qlcn.ps1'), `﻿${script}`)
+} else {
+  fs.copyFileSync(path.join(binSource, 'qlcn'), path.join(binStage, 'qlcn'))
+  fs.chmodSync(path.join(binStage, 'qlcn'), 0o755)
+}
 
 // 5. metadata
 fs.writeFileSync(
