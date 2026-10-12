@@ -397,6 +397,28 @@ describe('orders', () => {
       expect(await debt()).toBe(71856)
     })
 
+    it('lists deleted orders on request, most recently deleted first', async () => {
+      const older = await createOrder()
+      const newer = await createOrder()
+      const kept = await createOrder()
+      await t.api.delete(`/api/orders/${newer.id}`)
+      t.setNow(new Date('2026-10-11T03:01:00Z'))
+      await t.api.delete(`/api/orders/${older.id}`)
+
+      const deletedList = (await t.api.get('/api/orders?deleted=1')).body
+      expect(deletedList.items.map((order: { id: string }) => order.id)).toEqual([older.id, newer.id])
+      expect(deletedList.total).toBe(2)
+      expect((await t.api.get('/api/orders')).body.items.map((order: { id: string }) => order.id)).toEqual([kept.id])
+
+      // Restoring takes it off the deleted list.
+      await t.api.post(`/api/orders/${older.id}/restore`)
+      expect((await t.api.get('/api/orders?deleted=1')).body.items).toHaveLength(1)
+    })
+
+    it('rejects a deleted filter other than 0 or 1', async () => {
+      expect((await t.api.get('/api/orders?deleted=yes')).status).toBe(400)
+    })
+
     it('cannot edit a deleted order', async () => {
       const order = await createOrder()
       await t.api.delete(`/api/orders/${order.id}`)

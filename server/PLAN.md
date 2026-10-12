@@ -509,7 +509,7 @@ Xóa mềm cho order/return/payment/adjustment/product/unit. Chỉ `orders` có 
 - Response: đơn đầy đủ `{id, code, customerId, date, seq, lines, vat:{ratePercent, amount, manual}|null, fees, note, total, version, createdAt, lastEditAt, deletedAt}`.
 - FE hiện gửi `vat` (boolean), `vatRate`, `vatAmount` rời (`OrderFormPage.jsx:152-160`) → Phase 6 sửa đúng chỗ đó.
 
-**`GET /orders?date&customerId&limit&offset`** → `{items, total, summary:{dayTotal}}`; loại đơn đã xóa; sắp `date DESC, seq`.
+**`GET /orders?date&customerId&deleted&limit&offset`** → `{items, total, summary:{dayTotal}}`; mặc định loại đơn đã xóa, sắp `date DESC, seq`. `deleted=1` → chỉ đơn đã xóa, sắp theo lúc xóa mới nhất trước (để khôi phục đơn lỡ xóa).
 
 **`GET /orders/:id`** → đơn + `balanceBefore`, `balanceAfter`, `editHistory:[{editedAt, oldTotal, newTotal, diff, changes:string[]}]`, kèm tên khách/hàng/quy cách để in phiếu.
 

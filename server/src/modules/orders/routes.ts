@@ -60,6 +60,8 @@ const updateBodySchema = orderBodySchema.extend({
 const listSchema = paginationSchema.extend({
   date: isoDateSchema.optional(),
   customerId: idSchema.optional(),
+  // Query strings carry no booleans; "1" lists the deleted orders instead, so they can be restored.
+  deleted: z.enum(['0', '1'], { error: 'Chỉ nhận 0 hoặc 1' }).default('0'),
 })
 
 interface ListedOrderRow {
@@ -73,7 +75,8 @@ export function registerOrderRoutes(app: FastifyInstance, ctx: AppContext): void
     const { branchId } = authorize(request, 'orders:read')
     const query = parseInput(listSchema, request.query)
 
-    const conditions = ['branch_id = @branchId', 'deleted_at IS NULL']
+    const listDeleted = query.deleted === '1'
+    const conditions = ['branch_id = @branchId', listDeleted ? 'deleted_at IS NOT NULL' : 'deleted_at IS NULL']
     const params: Record<string, string | number> = { branchId }
     if (query.date) {
       conditions.push('date = @date')
@@ -84,11 +87,13 @@ export function registerOrderRoutes(app: FastifyInstance, ctx: AppContext): void
       params['customerId'] = query.customerId
     }
     const where = conditions.join(' AND ')
+    // The order deleted by mistake a minute ago must be at the top, whatever its date.
+    const orderBy = listDeleted ? 'deleted_at DESC, date DESC, seq DESC' : 'date DESC, seq DESC'
 
     const ids = ctx.db
       .prepare(
         `SELECT id FROM orders WHERE ${where}
-          ORDER BY date DESC, seq DESC LIMIT @limit OFFSET @offset`,
+          ORDER BY ${orderBy} LIMIT @limit OFFSET @offset`,
       )
       .all({ ...params, limit: query.limit, offset: query.offset }) as ListedOrderRow[]
 
