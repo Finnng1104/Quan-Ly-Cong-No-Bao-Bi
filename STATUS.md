@@ -93,7 +93,19 @@ Windows sạch (nếu khách dùng Windows) và thí điểm 1–2 tuần — đ
 3. Cách gửi file chẩn đoán khi lỗi, và cách khôi phục từ backup (cần C1/C2).
 4. Cho khách biết: dữ liệu nằm trên máy họ; backup cloud nằm trong tài khoản R2 của bạn (không mã hóa phía client).
 
-## 5. Lệnh hay dùng
+## 5. Việc cho người làm giao diện (Finn chỉ làm backend)
+
+Trước hết nên xem commit `feat(web): connect screens to the local backend` trên branch này: nó đã nối 13 màn
+hình vào API thật và sửa 6 lỗi có sẵn (mục 2). Bốn việc dưới đây backend **đã sẵn sàng**, chỉ cần giao diện.
+
+| # | Việc | Gọi gì | Ghi chú |
+|---|---|---|---|
+| F1 | Dải cảnh báo khi sao lưu hỏng | `GET /api/health` (không cần đăng nhập) → `{ status: "ok" \| "warning" \| "error", warnings: string[], lastBackup: { at } \| null }` | `warnings` đã là câu tiếng Việt cho người dùng (vd "Đã hơn 48 giờ chưa sao lưu lên cloud"). Gọi khi mở app và mỗi ~30 phút; có cảnh báo thì hiện dải vàng + "hãy báo hỗ trợ". **Quan trọng nhất**: hiện giờ backup hỏng không ai biết |
+| F2 | Xem và khôi phục đơn đã xóa | `GET /api/orders?deleted=1` (cùng dạng phản hồi, đơn xóa gần nhất đứng đầu) → `POST /api/orders/:id/restore` | Trang Đơn hàng thêm bộ lọc "Đơn đã xóa"; nút **Khôi phục** ở `OrderDetailPage` đã có sẵn, chỉ chưa có đường đi tới |
+| F3 | Nút **Xuất PDF / Xuất Excel** ở Sao kê đang giả lập | Dữ liệu: `GET /api/customers/:id/statement?from&to`; sau khi tạo file thì `POST /api/customers/:id/statement-exports` như hiện tại | Toast đang hiện chữ "(giả lập)" cho khách. Không cần thư viện mới: Excel = CSV bằng `toCsv`/`downloadText` (như nút xuất công nợ ở Cài đặt), PDF = `window.print()` với CSS in (như phiếu đơn). Hoặc tạm ẩn 2 nút |
+| F4 | Hộp thoại PDF ở chi tiết đơn ghi "bấm Xuất" nhưng không có nút Xuất (bấm khổ giấy là in luôn) | — | Sửa 1 dòng chữ trong `OrderDetailPage.jsx` |
+
+## 6. Lệnh hay dùng
 ```bash
 # kiểm tra
 cd server && npx tsc --noEmit && npm test     # 727 test
