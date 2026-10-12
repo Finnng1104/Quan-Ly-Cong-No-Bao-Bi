@@ -56,6 +56,10 @@ function keygen() {
 
   const privatePath = path.join(dir, `${name}.private.pem`)
   const publicPath = path.join(dir, `${name}.public.pem`)
+  // Overwriting a key that installed machines already trust would lock them out of every future update.
+  for (const existing of [privatePath, publicPath]) {
+    if (fs.existsSync(existing)) throw new Error(`refusing to overwrite existing key: ${existing}`)
+  }
   fs.writeFileSync(privatePath, privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 })
   fs.writeFileSync(publicPath, publicKey.export({ type: 'spki', format: 'pem' }))
   console.log(`private key (keep secret, back it up offline): ${privatePath}`)

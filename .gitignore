@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Release signing keys: only *.public.pem may be committed
+*.private.pem
