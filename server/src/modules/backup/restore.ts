@@ -7,6 +7,7 @@ import { createGunzip } from 'node:zlib'
 import type { Logger } from 'pino'
 import { openDatabase } from '../../db/client.js'
 import { getSchemaVersion } from '../../db/migrate.js'
+import { todayInShopZone } from '../../shared/dates.js'
 import { listLocalSnapshots, writeCompressedSnapshot } from './service.js'
 
 export type RestoreErrorCode =
@@ -29,7 +30,7 @@ export class RestoreError extends Error {
 export interface RestoreInput {
   dbPath: string
   backupsDir: string
-  /** A file path, or a YYYY-MM-DD date to take the newest local snapshot of that day. */
+  /** A file path, or a YYYY-MM-DD date (shop time) to take the newest local snapshot of that day. */
   source: string
   /** Highest schema version this build understands (number of migration files). */
   supportedSchemaVersion: number
@@ -44,10 +45,16 @@ export interface RestoreResult {
   safetySnapshot: string | null
 }
 
+/** Shop-time date of a snapshot. File names carry UTC, e.g. 2026-10-11T20-00-00Z is 12/10 in Vietnam. */
+function shopDateOfStamp(stamp: string): string {
+  const iso = stamp.replace(/T(\d{2})-(\d{2})-(\d{2})Z$/, 'T$1:$2:$3Z')
+  return todayInShopZone(new Date(iso))
+}
+
 async function resolveSource(input: RestoreInput): Promise<string> {
   if (/^\d{4}-\d{2}-\d{2}$/.test(input.source)) {
     const snapshots = await listLocalSnapshots(input.backupsDir)
-    const ofDay = snapshots.filter((entry) => entry.stamp.startsWith(input.source))
+    const ofDay = snapshots.filter((entry) => shopDateOfStamp(entry.stamp) === input.source)
     const newest = ofDay.at(-1)
     if (!newest) throw new RestoreError('SOURCE_NOT_FOUND', `No local backup found for ${input.source}`)
     return path.join(input.backupsDir, newest.fileName)
@@ -123,9 +130,11 @@ export async function restoreFromBackup(input: RestoreInput): Promise<RestoreRes
     }
 
     // The old WAL/SHM files belong to the old database and must not be replayed onto the new one.
-    await fsp.rm(input.dbPath, { force: true })
+    // (Closing the snapshot connection above already checkpointed the WAL into the database file.)
     await fsp.rm(`${input.dbPath}-wal`, { force: true })
     await fsp.rm(`${input.dbPath}-shm`, { force: true })
+    // rename() replaces the file in one step, so a power cut leaves either the old or the new
+    // database — never no database, which would make the next start create an empty one.
     await fsp.rename(candidate, input.dbPath)
 
     log.info({ source }, 'database restored')

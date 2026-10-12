@@ -31,10 +31,10 @@ describe('restore', () => {
     db.close()
     return rows.map((row) => row.name)
   }
-  const takeBackup = async (): Promise<string> => {
+  const takeBackup = async (now: () => Date = clock): Promise<string> => {
     const db = openDatabase(dbPath)
     const result = await runBackup(
-      { db, backupsDir, config: { localRetention: 7, destinations: [] }, logger, now: clock },
+      { db, backupsDir, config: { localRetention: 7, destinations: [] }, logger, now },
       'manual',
     )
     db.close()
@@ -88,6 +88,16 @@ describe('restore', () => {
 
     expect(result.restoredFrom).toContain('2026-10-11T03-00-00Z')
     expect(customerNames()).toEqual(['Thanh Nhi'])
+  })
+
+  it('matches the date in shop time, not in the UTC time of the file name', async () => {
+    addCustomer('Thanh Nhi')
+    // 20:00 UTC on 11/10 is 03:00 on 12/10 in Vietnam.
+    await takeBackup(() => new Date('2026-10-11T20:00:00Z'))
+
+    await expect(restoreFromBackup(input('2026-10-11'))).rejects.toMatchObject({ code: 'SOURCE_NOT_FOUND' })
+    const result = await restoreFromBackup(input('2026-10-12'))
+    expect(result.restoredFrom).toContain('2026-10-11T20-00-00Z')
   })
 
   it('refuses while the server is running', async () => {
