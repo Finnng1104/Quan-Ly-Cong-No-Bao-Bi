@@ -120,5 +120,3 @@ export function Avatar({ name, className = 'h-10 w-10 text-sm' }) {
     </div>
   )
 }
-
-export { avatarColors }

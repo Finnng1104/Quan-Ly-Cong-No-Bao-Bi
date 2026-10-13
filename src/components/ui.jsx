@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect } from 'react'
 import { X, AlertTriangle, Inbox } from 'lucide-react'
 import { fmtMoney } from '../lib/format'
 
@@ -247,24 +247,5 @@ export function SegmentedTabs({ tabs, active, onChange }) {
         </button>
       ))}
     </div>
-  )
-}
-
-// ---------- Debounced input ----------
-export function SearchInput({ value, onChange, placeholder, className = '' }) {
-  const [v, setV] = useState(value || '')
-  const t = useRef()
-  useEffect(() => setV(value || ''), [value])
-  return (
-    <Input
-      value={v}
-      placeholder={placeholder}
-      className={className}
-      onChange={(e) => {
-        setV(e.target.value)
-        clearTimeout(t.current)
-        t.current = setTimeout(() => onChange(e.target.value), 180)
-      }}
-    />
   )
 }
