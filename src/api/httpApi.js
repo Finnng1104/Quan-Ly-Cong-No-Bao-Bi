@@ -127,6 +127,9 @@ export const api = {
     customerDebts: async (asOf) => (await request('GET', '/reports/customer-debts', { query: { asOf } })).items,
   },
 
+  /** { status: 'ok' | 'warning' | 'error', warnings: string[], lastBackup }. Needs no login. */
+  health: () => request('GET', '/health'),
+
   /** Fire-and-forget report of a browser error, stored next to the server log. */
   reportError: (report) => request('POST', '/client-log', { body: report }),
 }

@@ -19,6 +19,7 @@ import {
 import { useStore } from '../store/useStore'
 import { api } from '../api/httpApi'
 import { useAsync } from '../hooks/useAsync'
+import HealthBanner from './HealthBanner'
 import { fmtMoney, todayISO } from '../lib/format'
 
 const navItems = [
@@ -113,6 +114,7 @@ export default function AppLayout() {
 
       {/* ===== Content ===== */}
       <main className="mx-auto w-full max-w-3xl px-4 pb-28 pt-4 lg:ml-64 lg:max-w-5xl lg:px-8 lg:pb-10">
+        <HealthBanner />
         <Outlet />
       </main>
 
