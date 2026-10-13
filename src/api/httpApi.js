@@ -90,9 +90,13 @@ export const api = {
   },
 
   orders: {
-    /** { items, total, summary: { filteredTotal, dayTotal } }; items have `editCount`. */
-    list: async ({ date, customerId, limit, offset } = {}) => {
-      const result = await request('GET', '/orders', { query: { date, customerId, limit, offset } })
+    /**
+     * { items, total, summary: { filteredTotal, dayTotal } }; items have `editCount`.
+     * `deleted: true` lists only deleted orders, most recently deleted first.
+     */
+    list: async ({ date, customerId, deleted, limit, offset } = {}) => {
+      const query = { date, customerId, deleted: deleted ? 1 : undefined, limit, offset }
+      const result = await request('GET', '/orders', { query })
       return { ...result, items: result.items.map(toOrder) }
     },
     /** The order plus `balanceBefore`, `balanceAfter` and `editHistory`. */

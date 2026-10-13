@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { CalendarDays, History, ChevronRight, User, PlusCircle } from 'lucide-react'
+import { CalendarDays, History, ChevronRight, User, PlusCircle, Trash2 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { api } from '../api/httpApi'
 import { useAsync } from '../hooks/useAsync'
-import { fmtMoney, fmtDate, fmtQty } from '../lib/format'
+import { fmtMoney, fmtDate, fmtDateTime, fmtQty } from '../lib/format'
 import { Card, Money, Badge, Empty, Button } from '../components/ui'
 import { ErrorCard } from '../components/AsyncState'
 import { PickerModal, PickerButton, Avatar } from '../components/pickers'
@@ -16,13 +16,14 @@ export default function OrdersPage() {
   const navigate = useNavigate()
   const [date, setDate] = useState('')
   const [customerId, setCustomerId] = useState('')
+  const [showDeleted, setShowDeleted] = useState(false)
   const [custPicker, setCustPicker] = useState(false)
   const [limit, setLimit] = useState(PAGE_SIZE)
   const data = useStore()
 
   const { data: page, error, reload } = useAsync(
-    () => api.orders.list({ date, customerId, limit, offset: 0 }),
-    [date, customerId, limit, data.dataVersion],
+    () => api.orders.list({ date, customerId, deleted: showDeleted, limit, offset: 0 }),
+    [date, customerId, showDeleted, limit, data.dataVersion],
   )
 
   const orders = page?.items ?? []
@@ -55,11 +56,26 @@ export default function OrdersPage() {
             {customerId ? data.customers.find((c) => c.id === customerId)?.name : null}
           </PickerButton>
         </div>
-        {(date || customerId) && (
+        <button
+          onClick={() => {
+            setShowDeleted((on) => !on)
+            setLimit(PAGE_SIZE)
+          }}
+          aria-pressed={showDeleted}
+          className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[13px] font-semibold transition-colors active:scale-[0.97] ${
+            showDeleted
+              ? 'border-rose-200 bg-rose-50 text-rose-600'
+              : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+          }`}
+        >
+          <Trash2 size={14} /> Đơn đã xóa
+        </button>
+        {(date || customerId || showDeleted) && (
           <button
             onClick={() => {
               setDate('')
               setCustomerId('')
+              setShowDeleted(false)
               setLimit(PAGE_SIZE)
             }}
             className="rounded-xl px-3 py-2 text-[13px] font-semibold text-rose-500 hover:bg-rose-50"
@@ -80,7 +96,11 @@ export default function OrdersPage() {
         <ErrorCard error={error} onRetry={reload} />
       ) : orders.length === 0 ? (
         <Card>
-          <Empty title="Không có đơn nào" desc="Thử đổi bộ lọc hoặc tạo đơn mới" />
+          {showDeleted ? (
+            <Empty title="Không có đơn đã xóa" desc="Đơn bị xóa sẽ hiện ở đây để khôi phục lại" />
+          ) : (
+            <Empty title="Không có đơn nào" desc="Thử đổi bộ lọc hoặc tạo đơn mới" />
+          )}
         </Card>
       ) : (
         <Card className="divide-y divide-slate-50 overflow-hidden">
@@ -100,6 +120,11 @@ export default function OrdersPage() {
                     <p className="truncate text-[14px] font-semibold text-slate-800">
                       {c?.name || '—'}
                     </p>
+                    {o.deletedAt && (
+                      <Badge tone="rose" className="shrink-0">
+                        Đã xóa
+                      </Badge>
+                    )}
                     {o.editCount > 0 && (
                       <Badge tone="violet">
                         <History size={10} /> Đã điều chỉnh
@@ -118,6 +143,11 @@ export default function OrdersPage() {
                       .join(', ')}
                     {o.lines.length > 2 ? ` +${o.lines.length - 2} dòng` : ''}
                   </p>
+                  {o.deletedAt && (
+                    <p className="text-[11.5px] font-semibold text-rose-500">
+                      Xóa lúc {fmtDateTime(o.deletedAt)}
+                    </p>
+                  )}
                 </div>
                 <Money value={o.total} className="text-[14px]" />
                 <ChevronRight size={15} className="shrink-0 text-slate-300" />
@@ -133,13 +163,15 @@ export default function OrdersPage() {
         </Button>
       )}
 
-      {/* tổng cuối ngày */}
-      <Card className="flex items-center justify-between bg-gradient-to-r from-indigo-600 to-blue-600 p-4 text-white">
-        <p className="text-[13.5px] font-semibold">
-          Tổng đơn {date ? fmtDate(date) : 'hôm nay'}
-        </p>
-        <p className="text-xl font-extrabold tabular-nums">{fmtMoney(dayTotal)} đ</p>
-      </Card>
+      {/* tổng cuối ngày — đơn đã xóa không tính vào đây nên ẩn khi đang xem chúng */}
+      {!showDeleted && (
+        <Card className="flex items-center justify-between bg-gradient-to-r from-indigo-600 to-blue-600 p-4 text-white">
+          <p className="text-[13.5px] font-semibold">
+            Tổng đơn {date ? fmtDate(date) : 'hôm nay'}
+          </p>
+          <p className="text-xl font-extrabold tabular-nums">{fmtMoney(dayTotal)} đ</p>
+        </Card>
+      )}
 
       <PickerModal
         open={custPicker}
