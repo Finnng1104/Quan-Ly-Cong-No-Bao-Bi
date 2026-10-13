@@ -11,12 +11,25 @@ const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
  * - Exact Origin on writes: SameSite cookies are scoped by *site*, not by port, so another
  *   app on localhost:3000 would still be same-site. Only our own origin may write.
  * - JSON-only bodies: rules out "simple" cross-site form posts (text/plain, multipart...).
+ *
+ * When hosted online, `publicOrigins` adds the public https addresses to both lists. A proxy in
+ * front (e.g. Vercel forwarding /api) may send either its own or our address as Host, and the
+ * browser sends the site's address as Origin, so every listed address is accepted for both.
  */
-export function registerRequestGuard(app: FastifyInstance, options: { port: number }): void {
-  const allowedHosts = new Set([`localhost:${options.port}`, `127.0.0.1:${options.port}`])
+export function registerRequestGuard(
+  app: FastifyInstance,
+  options: { port: number; publicOrigins?: string[] },
+): void {
+  const publicOrigins = options.publicOrigins ?? []
+  const allowedHosts = new Set([
+    `localhost:${options.port}`,
+    `127.0.0.1:${options.port}`,
+    ...publicOrigins.map((origin) => new URL(origin).host),
+  ])
   const allowedOrigins = new Set([
     `http://localhost:${options.port}`,
     `http://127.0.0.1:${options.port}`,
+    ...publicOrigins,
   ])
 
   app.addHook('onRequest', async (request) => {

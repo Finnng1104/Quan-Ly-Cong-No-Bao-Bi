@@ -113,6 +113,7 @@ Portal cho khách · đa vai trò/phân quyền thật · nhiều chi nhánh th�
 | D-29 | Server chạy dưới **`NT AUTHORITY\LocalService`** (Windows), không `SYSTEM`. Hệ quả: cập nhật **chỉ qua lệnh admin** |
 | D-30 | **Cổng cố định** chọn lúc cài, lưu vào config, không bao giờ tự đổi lúc chạy (PWA + cookie gắn với origin) |
 | D-33 | Bảo mật localhost: allowlist header `Host`, `Origin` khớp chính xác cả cổng, cookie `qlcn_sid`, khóa đăng nhập theo username |
+| D-35 | (2026-10-13) Chạy online cho khách thử: chỉ bật khi có `QLCN_PUBLIC_URLS` (https) — nghe `0.0.0.0`, cổng theo `PORT`, thêm các địa chỉ đó vào allowlist Host/Origin của D-33, cookie `Secure`, tài khoản đầu từ `QLCN_ADMIN_*`. Không có biến thì bản cài local giữ nguyên D-33. Cách deploy: `DEPLOY.md` |
 | D-34 | Log: `pino` + `pino-roll`; chẩn đoán chỉ qua CLI `doctor` |
 
 ---

@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
+import type { Logger } from 'pino'
 import { buildApp } from './app.js'
 import { ask, readLineFromStdin } from './cli/prompt.js'
 import { initAdmin } from './cli/init-admin.js'
@@ -116,6 +117,21 @@ async function loggerFor(config: AppConfig, component: string) {
   return root.child({ component })
 }
 
+/**
+ * Hosted online there is no terminal to run `init-admin` in, so the first account can come from
+ * QLCN_ADMIN_USERNAME / QLCN_ADMIN_PASSWORD. Does nothing once any account exists.
+ */
+async function initAdminFromEnvironment(db: Database, logger: Logger): Promise<void> {
+  const username = process.env['QLCN_ADMIN_USERNAME']
+  const password = process.env['QLCN_ADMIN_PASSWORD']
+  if (!username || !password) return
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    throw new ConfigError(`QLCN_ADMIN_PASSWORD must be at least ${MIN_PASSWORD_LENGTH} characters`)
+  }
+  const result = await initAdmin(db, logger, { username, password })
+  if (result === 'created') logger.info({ username }, 'first account created from the environment')
+}
+
 async function runServe(flags: ConfigFlags): Promise<void> {
   const config = loadConfig({ flags, env: process.env })
   // Untagged root logger: the app and its modules add their own component to each line.
@@ -125,6 +141,7 @@ async function runServe(flags: ConfigFlags): Promise<void> {
   let db: Database
   try {
     db = prepareDatabase(config)
+    await initAdminFromEnvironment(db, logger)
   } catch (error) {
     logger.fatal({ err: error }, 'cannot prepare the database')
     process.exit(exitCodeFor(error))
@@ -146,6 +163,7 @@ async function runServe(flags: ConfigFlags): Promise<void> {
     hasCloudBackup: config.backup.destinations.some((destination) => destination.type === 's3'),
     onDataChanged: () => scheduler.markDirty(),
     ...(config.webRoot ? { webRoot: config.webRoot } : {}),
+    publicOrigins: config.publicOrigins,
   })
 
   let shuttingDown = false

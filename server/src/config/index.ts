@@ -7,6 +7,8 @@ import { LOG_LEVELS, type LogLevel } from '../shared/logger.js'
 // Fixed for the lifetime of an install: the PWA and the session cookie are bound to this origin.
 export const DEFAULT_PORT = 8686
 export const SERVER_HOST = '127.0.0.1'
+// Hosted online (e.g. a trial server for the customer), the platform's proxy must reach us.
+const HOSTED_SERVER_HOST = '0.0.0.0'
 const APP_DIR_NAME = 'QuanLyCongNo'
 
 export class ConfigError extends Error {
@@ -42,8 +44,14 @@ export interface BackupConfig {
 }
 
 export interface AppConfig {
-  host: typeof SERVER_HOST
+  host: string
   port: number
+  /**
+   * https origins the app is reached through when hosted online (QLCN_PUBLIC_URLS), e.g. the
+   * Vercel site and the backend's own address. Empty for a normal install on the shop's machine,
+   * which only ever listens on localhost.
+   */
+  publicOrigins: string[]
   dataDir: string
   dbPath: string
   logsDir: string
@@ -120,6 +128,23 @@ function parsePort(raw: unknown, source: string): number {
   return port
 }
 
+function parsePublicOrigins(raw: string | undefined): string[] {
+  if (raw === undefined || raw.trim() === '') return []
+  return raw.split(',').map((entry) => {
+    let url: URL
+    try {
+      url = new URL(entry.trim())
+    } catch {
+      throw new ConfigError(`Invalid address in QLCN_PUBLIC_URLS: "${entry.trim()}"`)
+    }
+    // The session cookie is marked Secure when hosted, so plain http would make login impossible.
+    if (url.protocol !== 'https:') {
+      throw new ConfigError(`QLCN_PUBLIC_URLS must use https: "${entry.trim()}"`)
+    }
+    return url.origin
+  })
+}
+
 function parseLogLevel(raw: string, source: string): LogLevel {
   if (!(LOG_LEVELS as readonly string[]).includes(raw)) {
     throw new ConfigError(`Invalid log level from ${source}: "${raw}" (expected ${LOG_LEVELS.join('|')})`)
@@ -162,14 +187,20 @@ export function loadConfig(input: LoadConfigInput): AppConfig {
   const configFilePath = path.join(dataDir, 'config.json')
   const file = readConfigFile(configFilePath)
 
+  const publicOrigins = parsePublicOrigins(env['QLCN_PUBLIC_URLS'])
+  const hosted = publicOrigins.length > 0
+
   const port =
     flags.port !== undefined
       ? parsePort(flags.port, '--port')
       : env['QLCN_PORT'] !== undefined
         ? parsePort(env['QLCN_PORT'], 'QLCN_PORT')
-        : file.port !== undefined
-          ? parsePort(file.port, 'config.json')
-          : DEFAULT_PORT
+        : // Hosting platforms (Railway, Render, Fly...) tell the app which port to use through PORT.
+          hosted && env['PORT'] !== undefined
+          ? parsePort(env['PORT'], 'PORT')
+          : file.port !== undefined
+            ? parsePort(file.port, 'config.json')
+            : DEFAULT_PORT
 
   const logLevel =
     flags.logLevel !== undefined
@@ -181,8 +212,9 @@ export function loadConfig(input: LoadConfigInput): AppConfig {
   const webRoot = flags.webRoot ?? env['QLCN_WEB_ROOT'] ?? file.webRoot
 
   return {
-    host: SERVER_HOST,
+    host: hosted ? HOSTED_SERVER_HOST : SERVER_HOST,
     port,
+    publicOrigins,
     dataDir,
     dbPath: path.join(dataDir, 'data', 'app.db'),
     logsDir: path.join(dataDir, 'logs'),

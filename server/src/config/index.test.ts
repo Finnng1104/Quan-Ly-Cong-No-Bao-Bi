@@ -77,4 +77,32 @@ describe('loadConfig', () => {
     writeConfigFile(JSON.stringify({ port: 'eight' }))
     expect(() => loadConfig({ flags: { dataDir }, env: {} })).toThrowError(ConfigError)
   })
+
+  it('stays on localhost and ignores PORT unless hosted online', () => {
+    const config = loadConfig({ flags: { dataDir }, env: { PORT: '9100' } })
+
+    expect(config.host).toBe('127.0.0.1')
+    expect(config.port).toBe(DEFAULT_PORT)
+    expect(config.publicOrigins).toEqual([])
+  })
+
+  it('listens on every interface and takes the platform PORT when hosted online', () => {
+    const config = loadConfig({
+      flags: { dataDir },
+      env: { QLCN_PUBLIC_URLS: 'https://qlcn.vercel.app/, https://api.example.com', PORT: '9100' },
+    })
+
+    expect(config.host).toBe('0.0.0.0')
+    expect(config.port).toBe(9100)
+    expect(config.publicOrigins).toEqual(['https://qlcn.vercel.app', 'https://api.example.com'])
+  })
+
+  it('rejects a public address that is not https', () => {
+    expect(() =>
+      loadConfig({ flags: { dataDir }, env: { QLCN_PUBLIC_URLS: 'http://qlcn.vercel.app' } }),
+    ).toThrowError(/https/)
+    expect(() => loadConfig({ flags: { dataDir }, env: { QLCN_PUBLIC_URLS: 'not a url' } })).toThrowError(
+      ConfigError,
+    )
+  })
 })

@@ -56,6 +56,8 @@ describe('auth', () => {
       expect(setCookie).toMatch(/^qlcn_sid=/)
       expect(setCookie).toContain('HttpOnly')
       expect(setCookie).toContain('SameSite=Lax')
+      // Local installs are plain http; a Secure cookie would never be sent back.
+      expect(setCookie).not.toContain('Secure')
 
       const me = await t.app.inject({
         method: 'GET',

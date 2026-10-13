@@ -41,6 +41,8 @@ export interface BuildAppOptions {
   onDataChanged?: () => void
   /** Folder with the built web app. When set, the server also serves it (single-process install). */
   webRoot?: string
+  /** Public https origins when hosted online (see AppConfig.publicOrigins). Empty or absent locally. */
+  publicOrigins?: string[]
 }
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
@@ -57,6 +59,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   // Typed as Fastify's logger interface so FastifyInstance stays the plain, un-parameterised type.
   const loggerInstance: FastifyBaseLogger = options.logger.child({ component: 'server' })
   const ctx: AppContext = { db, logger: options.logger, now: options.now ?? (() => new Date()) }
+  const hosted = (options.publicOrigins ?? []).length > 0
 
   const app = Fastify({
     loggerInstance,
@@ -66,10 +69,12 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       return typeof supplied === 'string' && SAFE_REQUEST_ID.test(supplied) ? supplied : randomUUID()
     },
     bodyLimit: 1024 * 1024,
+    // Hosted online, requests arrive through the platform's proxy; trust it for the client IP in logs.
+    trustProxy: hosted,
   })
 
   // Hook order matters: reject foreign hosts/origins first, then read cookies, then authenticate.
-  registerRequestGuard(app, { port: options.port })
+  registerRequestGuard(app, { port: options.port, publicOrigins: options.publicOrigins ?? [] })
   await app.register(cookie)
   registerAuthHook(app, ctx)
 
@@ -147,7 +152,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     }
   })
 
-  registerAuthRoutes(app, ctx)
+  registerAuthRoutes(app, ctx, { secureCookie: hosted })
   registerSettingsRoutes(app, ctx)
   registerCustomerRoutes(app, ctx)
   registerCatalogRoutes(app, ctx)

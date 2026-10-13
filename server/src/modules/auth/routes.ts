@@ -15,7 +15,11 @@ const changePasswordSchema = z.object({
   newPassword: z.string({ error: 'Bắt buộc' }).max(200),
 })
 
-export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void {
+export function registerAuthRoutes(
+  app: FastifyInstance,
+  ctx: AppContext,
+  options: { secureCookie: boolean },
+): void {
   app.post('/api/auth/login', async (request, reply) => {
     const body = parseInput(loginSchema, request.body)
     const { token, user } = await login(ctx, body.username, body.password)
@@ -24,8 +28,9 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
       path: '/',
       httpOnly: true,
       sameSite: 'lax',
-      // Plain http on localhost, so `secure` cannot be set; the cookie never leaves this machine.
-      secure: false,
+      // A local install is plain http on localhost, where `secure` cannot be set and the cookie never
+      // leaves the machine. Hosted online it is https only, so the session cannot leak over http.
+      secure: options.secureCookie,
       maxAge: Math.floor(SESSION_TTL_MS / 1000),
     })
     return { username: user.username, role: user.role }
@@ -33,7 +38,7 @@ export function registerAuthRoutes(app: FastifyInstance, ctx: AppContext): void 
 
   app.post('/api/auth/logout', async (request, reply) => {
     if (request.sessionId) logout(ctx, request.sessionId)
-    reply.clearCookie(SESSION_COOKIE, { path: '/' })
+    reply.clearCookie(SESSION_COOKIE, { path: '/', secure: options.secureCookie })
     return { ok: true }
   })
 

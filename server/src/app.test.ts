@@ -5,6 +5,7 @@ import { buildApp } from './app.js'
 import { fileURLToPath } from 'node:url'
 import { openDatabase, type Database } from './db/client.js'
 import { loadMigrationFiles, runMigrations } from './db/migrate.js'
+import { createUser } from './modules/auth/service.js'
 
 const PORT = 8686
 const OWN_HOST = `localhost:${PORT}`
@@ -157,6 +158,60 @@ describe('http app', () => {
       expect(response.statusCode).toBe(200)
       const tagged = logRecords.filter((record) => record.requestId === 'trace-me')
       expect(tagged.map((record) => record.msg)).toEqual(['incoming request', 'request completed'])
+    })
+  })
+
+  describe('hosted online', () => {
+    const SITE = 'https://qlcn.vercel.app'
+    const BACKEND = 'https://qlcn-api.example.com'
+    let hostedApp: FastifyInstance
+
+    beforeEach(async () => {
+      const capture = createCaptureLogger()
+      hostedApp = await buildApp({
+        port: PORT,
+        db,
+        logger: capture.logger,
+        version: '1.2.3',
+        publicOrigins: [SITE, BACKEND],
+      })
+      await createUser(
+        { db, logger: capture.logger, now: () => new Date() },
+        { username: 'chu', password: 'mat-khau-dai' },
+      )
+    })
+
+    afterEach(async () => {
+      await hostedApp.close()
+    })
+
+    const login = (headers: Record<string, string>) =>
+      hostedApp.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        headers,
+        payload: { username: 'chu', password: 'mat-khau-dai' },
+      })
+
+    it('accepts the site forwarding /api to the backend, with a Secure session cookie', async () => {
+      // Vercel's rewrite may present either address as Host; the browser sends the site as Origin.
+      for (const host of ['qlcn-api.example.com', 'qlcn.vercel.app']) {
+        const response = await login({ host, origin: SITE })
+        expect(response.statusCode, host).toBe(200)
+        expect(String(response.headers['set-cookie'])).toContain('Secure')
+      }
+    })
+
+    it('still rejects other sites and plain http', async () => {
+      const foreign = await login({ host: 'qlcn-api.example.com', origin: 'https://evil.example.com' })
+      const plainHttp = await login({ host: 'qlcn-api.example.com', origin: 'http://qlcn.vercel.app' })
+      const unknownHost = await hostedApp.inject({
+        method: 'GET',
+        url: '/api/health',
+        headers: { host: 'evil.example.com' },
+      })
+
+      expect([foreign.statusCode, plainHttp.statusCode, unknownHost.statusCode]).toEqual([403, 403, 403])
     })
   })
 })
