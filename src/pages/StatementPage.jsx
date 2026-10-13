@@ -13,7 +13,7 @@ import { useStore, customerName } from '../store/useStore'
 import { api } from '../api/httpApi'
 import { useAsync } from '../hooks/useAsync'
 import { useAction } from '../hooks/useAction'
-import { fmtMoney, fmtDate, fmtDateTime, todayISO, addDaysISO, toCsv, downloadText } from '../lib/format'
+import { fmtMoney, fmtDate, fmtDateTime, todayISO, toISO, addDaysISO, toCsv, downloadText } from '../lib/format'
 import { statementCsvRows, statementFileName } from '../lib/statementExport'
 import { Card, Badge, Empty, Button, Field, Input } from '../components/ui'
 import { ErrorCard, LoadingCard } from '../components/AsyncState'
@@ -41,6 +41,8 @@ export default function StatementPage() {
   const ledger = statement
     ? { opening: statement.opening, rows: statement.rows, closing: statement.closing }
     : null
+  // Timestamps from the server are UTC; dates shown from them go through toISO(new Date(...)) so
+  // that an export at 00:11 Vietnam time shows as that day, not the previous UTC day.
   const lastExport = statement?.lastExport ?? null
   const editedOrders = statement?.editedOrders ?? []
   const editedById = new Map(editedOrders.map((o) => [o.id, o]))
@@ -202,7 +204,7 @@ export default function StatementPage() {
                             </Badge>
                             {latestEdit && (
                               <span className="text-[10.5px] font-semibold text-violet-500">
-                                sửa {fmtDate(latestEdit.editedAt.slice(0, 10))} ·{' '}
+                                sửa {fmtDate(toISO(new Date(latestEdit.editedAt)))} ·{' '}
                                 {fmtMoney(latestEdit.oldTotal)} → {fmtMoney(latestEdit.newTotal)} (
                                 {latestEdit.diff >= 0 ? '+' : ''}
                                 {fmtMoney(latestEdit.diff)})
@@ -244,7 +246,7 @@ export default function StatementPage() {
                 <History size={15} /> Điều chỉnh sau sao kê
               </p>
               <p className="mt-1.5 text-[13px] leading-relaxed text-slate-600">
-                Từ sao kê ngày <b>{fmtDate(lastExport.exportedAt.slice(0, 10))}</b> đến nay có{' '}
+                Từ sao kê ngày <b>{fmtDate(toISO(new Date(lastExport.exportedAt)))}</b> đến nay có{' '}
                 <b className="text-violet-700">{editedOrders.length} đơn điều chỉnh</b>, chênh lệch{' '}
                 <b className={totalDiff >= 0 ? 'text-rose-500' : 'text-emerald-600'}>
                   {totalDiff >= 0 ? '+' : '-'}
