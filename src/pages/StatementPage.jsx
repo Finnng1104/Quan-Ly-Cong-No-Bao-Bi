@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useSearchParams } from 'react-router-dom'
 import {
   FileText,
@@ -12,7 +13,8 @@ import { useStore, customerName } from '../store/useStore'
 import { api } from '../api/httpApi'
 import { useAsync } from '../hooks/useAsync'
 import { useAction } from '../hooks/useAction'
-import { fmtMoney, fmtDate, fmtDateTime, todayISO, addDaysISO } from '../lib/format'
+import { fmtMoney, fmtDate, fmtDateTime, todayISO, addDaysISO, toCsv, downloadText } from '../lib/format'
+import { statementCsvRows, statementFileName } from '../lib/statementExport'
 import { Card, Badge, Empty, Button, Field, Input } from '../components/ui'
 import { ErrorCard, LoadingCard } from '../components/AsyncState'
 import { PickerModal, PickerButton, Avatar } from '../components/pickers'
@@ -47,15 +49,33 @@ export default function StatementPage() {
     ? { inRange: statement.purchaseTotals.range, year: statement.purchaseTotals.last12Months }
     : null
 
+  const exportExcel = () => {
+    const name = customerName(data, customerId)
+    downloadText(
+      statementFileName(name, { from, to }, 'csv'),
+      toCsv(statementCsvRows(statement, { customerName: name, from, to })),
+      'text/csv;charset=utf-8',
+    )
+  }
+
+  const exportPdf = () => {
+    // Browsers suggest the page title as the PDF file name.
+    const pageTitle = document.title
+    document.title = statementFileName(customerName(data, customerId), { from, to }, 'pdf').replace(/\.pdf$/, '')
+    window.print()
+    document.title = pageTitle
+  }
+
+  // The export is recorded only after the file was produced: "edited since last export" marks
+  // are measured from that moment, so recording a failed export would hide real changes.
   const doExport = (kind) => {
     if (!customerId) return toast.error('Chọn khách trước')
+    if (!statement) return toast.error('Sao kê chưa tải xong')
+    if (kind === 'pdf') exportPdf()
+    else exportExcel()
     return run(async () => {
       await data.exportStatement(customerId, { from, to })
-      toast.success(
-        kind === 'pdf'
-          ? 'Đã xuất sao kê PDF (giả lập) — đã ghi nhớ lần xuất này'
-          : 'Đã xuất sao kê Excel (giả lập) — đã ghi nhớ lần xuất này',
-      )
+      toast.success('Đã xuất sao kê — đã ghi nhớ lần xuất này')
     })
   }
 
@@ -236,6 +256,52 @@ export default function StatementPage() {
           )}
         </>
       )}
+
+      {/* vùng in cho "Xuất PDF" — bảng đơn giản, chỉ hiện khi in (xem #print-area trong index.css) */}
+      {ledger &&
+        createPortal(
+          <div id="print-area" className="text-[11pt] text-slate-900">
+            <h2 className="text-[15pt] font-bold">Sao kê công nợ</h2>
+            <p>{data.settings.shopName}</p>
+            <p className="mt-2">
+              Khách hàng: <b>{customerName(data, customerId)}</b>
+            </p>
+            <p>
+              Kỳ: {fmtDate(from)} → {fmtDate(to)}
+            </p>
+            <table className="mt-3 w-full border-collapse">
+              <thead>
+                <tr className="border-b-2 border-slate-800 text-left">
+                  <th className="py-1 pr-2">Ngày</th>
+                  <th className="py-1 pr-2">Diễn giải</th>
+                  <th className="py-1 pr-2 text-right">Tăng</th>
+                  <th className="py-1 pr-2 text-right">Giảm</th>
+                  <th className="py-1 text-right">Dư nợ</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-b border-slate-300 font-semibold">
+                  <td className="py-1 pr-2" colSpan={4}>Dư đầu kỳ</td>
+                  <td className="py-1 text-right tabular-nums">{fmtMoney(ledger.opening)}</td>
+                </tr>
+                {ledger.rows.map((r, i) => (
+                  <tr key={i} className="border-b border-slate-200 align-top">
+                    <td className="whitespace-nowrap py-1 pr-2">{fmtDate(r.date)}</td>
+                    <td className="py-1 pr-2">{r.desc}</td>
+                    <td className="py-1 pr-2 text-right tabular-nums">{r.up ? fmtMoney(r.up) : ''}</td>
+                    <td className="py-1 pr-2 text-right tabular-nums">{r.down ? fmtMoney(r.down) : ''}</td>
+                    <td className="py-1 text-right tabular-nums">{fmtMoney(r.balance)}</td>
+                  </tr>
+                ))}
+                <tr className="border-t-2 border-slate-800 font-bold">
+                  <td className="py-1 pr-2" colSpan={4}>Dư cuối kỳ</td>
+                  <td className="py-1 text-right tabular-nums">{fmtMoney(ledger.closing)} đ</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>,
+          document.body,
+        )}
 
       <PickerModal
         open={custPicker}
