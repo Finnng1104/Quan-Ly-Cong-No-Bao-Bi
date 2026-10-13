@@ -25,3 +25,7 @@ dist-ssr
 
 # Release signing keys: only *.public.pem may be committed
 *.private.pem
+
+# Vercel CLI project link and pulled env files
+.vercel
+.env*

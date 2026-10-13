@@ -1,0 +1,6 @@
+# The frontend deploy needs only the web app; server/ holds local data and is deployed to Railway.
+server
+node_modules
+dist
+*.pem
+.env*
