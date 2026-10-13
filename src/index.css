@@ -33,6 +33,8 @@ input[type="number"] {
 }
 
 /* ===== Print: chỉ in vùng phiếu ===== */
+/* #print-area is portalled straight into <body>, so everything else can be removed from the
+   layout (display: none). Hiding it with visibility alone keeps its height and prints blank pages. */
 #print-area {
   display: none;
 }
@@ -42,21 +44,12 @@ input[type="number"] {
     background: #fff;
   }
 
-  body * {
-    visibility: hidden;
-  }
-
-  #print-area,
-  #print-area * {
-    visibility: visible;
+  body > :not(#print-area) {
+    display: none;
   }
 
   #print-area {
     display: block;
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    padding: 0;
   }
 
   @page {

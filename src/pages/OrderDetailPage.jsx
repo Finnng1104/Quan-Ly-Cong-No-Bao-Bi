@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { toPng } from 'html-to-image'
 import {
@@ -152,17 +153,20 @@ export default function OrderDetailPage() {
         />
       </Card>
 
-      {/* vùng in — trùng phiếu, chỉ hiện khi in */}
-      <div id="print-area" className={pageSize === 'a4' ? 'page-a4' : 'page-a5'}>
-        <OrderTicket
-          order={order}
-          customer={customer}
-          data={data}
-          oldDebt={order.balanceBefore ?? 0}
-          showDebt={showDebt}
-          shopName={data.settings.shopName}
-        />
-      </div>
+      {/* vùng in — trùng phiếu, chỉ hiện khi in (xem #print-area trong index.css) */}
+      {createPortal(
+        <div id="print-area" className={pageSize === 'a4' ? 'page-a4' : 'page-a5'}>
+          <OrderTicket
+            order={order}
+            customer={customer}
+            data={data}
+            oldDebt={order.balanceBefore ?? 0}
+            showDebt={showDebt}
+            shopName={data.settings.shopName}
+          />
+        </div>,
+        document.body,
+      )}
 
       {/* lịch sử điều chỉnh */}
       {edited && (
@@ -243,7 +247,7 @@ export default function OrderDetailPage() {
       {/* chọn khổ in / PDF */}
       <Modal open={printOpen} onClose={() => setPrintOpen(false)} title="Xuất PDF">
         <p className="mb-4 text-[13.5px] text-slate-500">
-          Chọn khổ giấy rồi bấm "Xuất" — trong hộp thoại in chọn "Lưu thành PDF".
+          Bấm vào khổ giấy muốn dùng, rồi trong hộp thoại in chọn "Lưu thành PDF".
         </p>
         <div className="grid grid-cols-2 gap-3">
           <button
