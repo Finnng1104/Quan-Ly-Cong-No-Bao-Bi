@@ -1,6 +1,6 @@
 # Tình trạng dự án và việc tồn đọng
 
-Cập nhật: 2026-10-12 (chiều) · Branch: `feat/backend` (chưa push, chưa merge vào `main`)
+Cập nhật: 2026-10-13 · Branch: `feat/backend` (chưa push, chưa merge vào `main`)
 
 Tài liệu thiết kế đầy đủ: `server/PLAN.md`. Cách phát hành bản cài: `server/packaging/README.md`.
 
@@ -8,7 +8,7 @@ Tài liệu thiết kế đầy đủ: `server/PLAN.md`. Cách phát hành bản
 
 | Hạng mục | Trạng thái |
 |---|---|
-| Backend (Node + Fastify + SQLite) | Xong, 727 test pass |
+| Backend (Node + Fastify + SQLite) | Xong, 735 test pass |
 | Nối giao diện với backend | Xong, đã bấm thử các luồng chính trên trình duyệt |
 | Đối chiếu công nợ với bản gốc (`debt.js`) | Xong, dữ liệu ngẫu nhiên khớp từng con số |
 | Backup / khôi phục / chẩn đoán / log | Xong; **chưa thử với R2 thật** |
@@ -77,11 +77,11 @@ Windows sạch (nếu khách dùng Windows) và thí điểm 1–2 tuần — đ
 | ~~C2~~ | ~~Lệnh `qlcn`~~ — **xong**: status/start/stop/backup/backups/restore/doctor/logs, đã thử thật trên macOS; bản Windows chưa chạy thật |
 | C3 | Dải "có bản mới" trong giao diện + `/api/system/update-status` (app chưa kiểm chữ ký, chỉ installer kiểm) |
 | C4 | Nút khôi phục backup trong Cài đặt — **PLAN đã chốt không làm** ("API backup/chẩn đoán qua web: dùng CLI"); chỉ làm nếu Finn đổi quyết định |
-| C5 | Xuất sao kê PDF/Excel thật — hiện chỉ ghi nhận lần xuất (đúng phạm vi D-01, nhưng khách có thể mong có file) |
+| ~~C5~~ | ~~Xuất sao kê PDF/Excel thật~~ — **xong** (F3 bên dưới) |
 | C6 | Test tự động cho giao diện (hiện chỉ test logic + bấm tay) |
 
 ### D. Nợ kỹ thuật nhỏ
-- 3 cảnh báo lint có sẵn (`Toast.jsx`, `pickers.jsx`, `ui.jsx`); web bundle 760 kB (chưa tách chunk).
+- 1 cảnh báo lint (`Toast.jsx` export cả hook lẫn component; chỉ ảnh hưởng hot-reload lúc dev); web bundle 760 kB (chưa tách chunk).
 - Tên file log của `pino-roll` có số lạ (`app.2026-10-12.3612.log`), chỉ là cosmetic.
 - `src/api/mockApi.js`, `src/data/mockData.js`, `src/lib/debt.js` không còn được app dùng; **giữ lại** vì test của
   `server/` dùng làm bản đối chiếu. Đừng xóa hay sửa công thức trong đó.
@@ -93,22 +93,41 @@ Windows sạch (nếu khách dùng Windows) và thí điểm 1–2 tuần — đ
 3. Cách gửi file chẩn đoán khi lỗi, và cách khôi phục từ backup (cần C1/C2).
 4. Cho khách biết: dữ liệu nằm trên máy họ; backup cloud nằm trong tài khoản R2 của bạn (không mã hóa phía client).
 
-## 5. Việc cho người làm giao diện (Finn chỉ làm backend)
+## 5. Sửa giao diện 2026-10-13 (Finn đồng ý cho sửa `src/`)
 
-Trước hết nên xem commit `feat(web): connect screens to the local backend` trên branch này: nó đã nối 13 màn
-hình vào API thật và sửa 6 lỗi có sẵn (mục 2). Bốn việc dưới đây backend **đã sẵn sàng**, chỉ cần giao diện.
+| # | Việc | Cách làm |
+|---|---|---|
+| F1 | Dải vàng cảnh báo sao lưu ở đầu mọi trang | `HealthBanner` gọi `GET /api/health` khi mở app và mỗi 30 phút; 503 → "không đọc được dữ liệu" |
+| F2 | Trang Đơn hàng có nút lọc **Đơn đã xóa** (`?deleted=1`) | Hiện giờ xóa; bấm vào đơn → **Khôi phục** đã có sẵn. Ẩn thẻ "Tổng đơn hôm nay" khi xem đơn xóa |
+| F3 | Sao kê **Xuất Excel** = file CSV (mở bằng Excel), **Xuất PDF** = hộp thoại in với bảng sao kê gọn | Tên file `sao-ke-<khach-khong-dau>-<từ>-<đến>`; chỉ ghi nhận "lần xuất" sau khi đã tạo file |
+| F4 | Sửa chữ hộp thoại PDF ở chi tiết đơn | — |
 
-| # | Việc | Gọi gì | Ghi chú |
-|---|---|---|---|
-| F1 | Dải cảnh báo khi sao lưu hỏng | `GET /api/health` (không cần đăng nhập) → `{ status: "ok" \| "warning" \| "error", warnings: string[], lastBackup: { at } \| null }` | `warnings` đã là câu tiếng Việt cho người dùng (vd "Đã hơn 48 giờ chưa sao lưu lên cloud"). Gọi khi mở app và mỗi ~30 phút; có cảnh báo thì hiện dải vàng + "hãy báo hỗ trợ". **Quan trọng nhất**: hiện giờ backup hỏng không ai biết |
-| F2 | Xem và khôi phục đơn đã xóa | `GET /api/orders?deleted=1` (cùng dạng phản hồi, đơn xóa gần nhất đứng đầu) → `POST /api/orders/:id/restore` | Trang Đơn hàng thêm bộ lọc "Đơn đã xóa"; nút **Khôi phục** ở `OrderDetailPage` đã có sẵn, chỉ chưa có đường đi tới |
-| F3 | Nút **Xuất PDF / Xuất Excel** ở Sao kê đang giả lập | Dữ liệu: `GET /api/customers/:id/statement?from&to`; sau khi tạo file thì `POST /api/customers/:id/statement-exports` như hiện tại | Toast đang hiện chữ "(giả lập)" cho khách. Không cần thư viện mới: Excel = CSV bằng `toCsv`/`downloadText` (như nút xuất công nợ ở Cài đặt), PDF = `window.print()` với CSS in (như phiếu đơn). Hoặc tạm ẩn 2 nút |
-| F4 | Hộp thoại PDF ở chi tiết đơn ghi "bấm Xuất" nhưng không có nút Xuất (bấm khổ giấy là in luôn) | — | Sửa 1 dòng chữ trong `OrderDetailPage.jsx` |
+Sửa thêm khi kiểm tra:
+- In ra **trang trắng thừa** khi trang dài (sao kê; đơn nhiều dòng): vùng in giờ nằm thẳng trong `<body>` (portal), lúc in mọi thứ khác bị `display: none`.
+- Sao kê ghi "Từ sao kê ngày 12/10" cho lần xuất lúc 00:11 ngày 13/10 (cắt chuỗi giờ UTC) — giờ đổi theo giờ máy.
+- Xóa `SearchInput` (không dùng) và export thừa `avatarColors`.
 
-## 6. Lệnh hay dùng
+Đã kiểm bằng trình duyệt tự động (Playwright) trên server thử: 13 màn hình × 375/768/1280 không lỗi console, không
+tràn ngang; luồng xóa → xem đơn đã xóa → khôi phục; tải CSV; PDF sao kê 1 trang; phiếu đơn vẫn in 1 trang.
+**Chưa** in ra máy in thật (B5).
+
+## 6. Đưa lên mạng cho khách thử (Vercel + Railway) — code xong, chưa deploy
+
+Finn chọn deploy cả FE và BE. Cách làm từng bước: **`DEPLOY.md`**.
+
+- Backend có chế độ online, **chỉ bật khi có `QLCN_PUBLIC_URLS`** (D-35 trong `server/PLAN.md`): nghe `0.0.0.0`,
+  cổng theo `PORT`, cho phép các địa chỉ đó qua kiểm tra Host/Origin, cookie `Secure`, tạo tài khoản đầu từ
+  `QLCN_ADMIN_USERNAME`/`QLCN_ADMIN_PASSWORD`. Bản cài local không đổi.
+- `server/Dockerfile`: đã build và chạy thử (linux/amd64) — đăng nhập qua Origin giả lập Vercel được, Origin lạ bị
+  chặn, dữ liệu còn sau khi khởi động lại, tài khoản chỉ tạo 1 lần.
+- `vercel.json`: chuyển `/api/*` sang backend — **phải thay `SET-BACKEND-URL.invalid`** bằng địa chỉ backend thật.
+- **Chưa kiểm chứng** trên Vercel/Railway thật (cần tài khoản của Finn): nhất là Vercel có chuyển header `Origin`
+  sang backend không — nếu mọi thao tác lưu báo "Nguồn yêu cầu không hợp lệ" thì báo lại.
+
+## 7. Lệnh hay dùng
 ```bash
 # kiểm tra
-cd server && npx tsc --noEmit && npm test     # 727 test
+cd server && npx tsc --noEmit && npm test     # 735 test
 cd .. && npm test && npm run lint && npm run build
 
 # chạy phát triển: xem README.md (backend rồi web)
