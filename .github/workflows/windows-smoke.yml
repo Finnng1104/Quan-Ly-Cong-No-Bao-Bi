@@ -128,6 +128,46 @@ jobs:
           irm "$env:BASE_URL/install.ps1" | iex
           Invoke-RestMethod "http://127.0.0.1:$env:PORT/api/health" | Out-Null
 
+      # Only on failure: compare the stored password hash with the ways the password could have been
+      # damaged on its way in, so the fix targets the real cause.
+      - name: Password probe
+        if: failure()
+        shell: powershell
+        run: |
+          $script = @'
+          import { createRequire } from 'node:module'
+          import { pathToFileURL } from 'node:url'
+          const [serverDir, dbPath] = process.argv.slice(2)
+          const requireFromApp = createRequire(serverDir + '/package.json')
+          const Database = requireFromApp('better-sqlite3')
+          const { verifyPassword } = await import(pathToFileURL(serverDir + '/dist/shared/password.js').href)
+          const rows = new Database(dbPath, { readonly: true }).prepare('SELECT username, password_hash FROM users').all()
+          const pw = process.env.ADMIN_PASSWORD
+          const bytes = Buffer.from(pw, 'utf8')
+          const candidates = {
+            original: pw,
+            questionMark_perChar: pw.replace(/[^\x00-\x7F]/g, '?'),
+            questionMark_perByte: [...bytes].map((b) => (b > 127 ? '?' : String.fromCharCode(b))).join(''),
+            nonAsciiDropped: pw.replace(/[^\x00-\x7F]/g, ''),
+            bomPrefix: '﻿' + pw,
+            crSuffix: pw + '\r',
+            nfd: pw.normalize('NFD'),
+            latin1Mojibake: bytes.toString('latin1'),
+            utf8ReadAsCp437ish: bytes.toString('latin1').replace(/[\x80-\x9f]/g, '?'),
+          }
+          console.log('users:', rows.map((r) => r.username).join(', '))
+          for (const row of rows) {
+            for (const [name, candidate] of Object.entries(candidates)) {
+              if (await verifyPassword(candidate, row.password_hash)) console.log('MATCH', row.username, '<-', name)
+            }
+          }
+          console.log('probe finished')
+          '@
+          $file = Join-Path $env:RUNNER_TEMP 'probe.mjs'
+          Set-Content -Path $file -Value $script -Encoding UTF8
+          $app = Join-Path $env:ProgramFiles 'QuanLyCongNo\app'
+          & (Join-Path $app 'runtime\node.exe') $file (Join-Path $app 'server') (Join-Path $env:ProgramData 'QuanLyCongNo\data\app.db')
+
       # Only on failure: what the scheduled task did, who may write where, and what the server says
       # when started by hand as Administrator (same node.exe, same arguments as the task).
       - name: Diagnostics
