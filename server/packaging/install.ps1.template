@@ -216,15 +216,32 @@ function Invoke-Qlcn([string]$AppPath, [string[]]$Arguments, [string]$StdIn) {
   $node = Join-Path $AppPath 'runtime\node.exe'
   $main = Join-Path $AppPath 'server\dist\main.js'
   if ($StdIn) {
-    # PowerShell 5.1 mã hóa dữ liệu pipe vào chương trình ngoài bằng ASCII: mật khẩu có dấu sẽ thành "?".
-    $previousEncoding = $OutputEncoding
-    $OutputEncoding = New-Object Text.UTF8Encoding($false)
-    try { $output = $StdIn | & $node $main @Arguments 2>&1 } finally { $OutputEncoding = $previousEncoding }
+    # Ghi thẳng byte UTF-8 vào stdin. Pipe của PowerShell 5.1 mã hóa theo $OutputEncoding (mặc định ASCII),
+    # nên mật khẩu có dấu sẽ thành "?" và sau đó không đăng nhập được.
+    $quote = { param($value) '"' + ($value -replace '"', '\"') + '"' }
+    $startInfo = New-Object Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $node
+    $startInfo.Arguments = (@(& $quote $main) + @($Arguments | ForEach-Object { & $quote $_ })) -join ' '
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardInput = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $process = [Diagnostics.Process]::Start($startInfo)
+    $bytes = (New-Object Text.UTF8Encoding($false)).GetBytes("$StdIn`n")
+    $process.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+    $process.StandardInput.Close()
+    $errorTask = $process.StandardError.ReadToEndAsync()
+    $standardOutput = $process.StandardOutput.ReadToEnd()
+    $process.WaitForExit()
+    $output = @($standardOutput -split "`r?`n") + @($errorTask.Result -split "`r?`n") | Where-Object { $_ }
+    $exitCode = $process.ExitCode
   } else {
     $output = & $node $main @Arguments 2>&1
+    $exitCode = $LASTEXITCODE
   }
   $output | ForEach-Object { Add-Content -Path $Script:LogFile -Value $_ -Encoding UTF8 }
-  return @{ ExitCode = $LASTEXITCODE; Output = $output }
+  return @{ ExitCode = $exitCode; Output = $output }
 }
 
 # ---------- 1. manifest + chữ ký ----------
