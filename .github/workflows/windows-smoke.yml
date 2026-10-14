@@ -119,6 +119,38 @@ jobs:
           irm "$env:BASE_URL/install.ps1" | iex
           Invoke-RestMethod "http://127.0.0.1:$env:PORT/api/health" | Out-Null
 
+      # Only on failure: what the scheduled task did, who may write where, and what the server says
+      # when started by hand as Administrator (same node.exe, same arguments as the task).
+      - name: Diagnostics
+        if: failure()
+        shell: powershell
+        run: |
+          $app = Join-Path $env:ProgramFiles 'QuanLyCongNo\app'
+          $data = Join-Path $env:ProgramData 'QuanLyCongNo'
+          Write-Host '--- scheduled task'
+          schtasks.exe /Query /TN $env:TASK_NAME /V /FO LIST
+          Write-Host '--- task info'
+          Get-ScheduledTaskInfo -TaskName $env:TASK_NAME | Format-List *
+          Write-Host '--- node processes'
+          Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" | Select-Object ProcessId, ExecutablePath, CommandLine | Format-List
+          Write-Host '--- data dir'
+          Get-ChildItem $data -Recurse -Force | Select-Object FullName, Length | Format-Table -AutoSize -Wrap
+          Write-Host '--- ACL: data dir, runtime'
+          icacls.exe $data
+          icacls.exe (Join-Path $app 'runtime\node.exe')
+          Write-Host '--- manual start as Administrator (10 s)'
+          $out = Join-Path $env:RUNNER_TEMP 'manual.out'; $err = Join-Path $env:RUNNER_TEMP 'manual.err'
+          $proc = Start-Process -FilePath (Join-Path $app 'runtime\node.exe') `
+            -ArgumentList "`"$(Join-Path $app 'server\dist\main.js')`"", 'supervise', '--data-dir', "`"$data`"", '--web-root', "`"$(Join-Path $app 'web')`"" `
+            -RedirectStandardOutput $out -RedirectStandardError $err -PassThru -WindowStyle Hidden
+          Start-Sleep -Seconds 10
+          try { Write-Host ('health: ' + (Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$env:PORT/api/health").Content) } catch { Write-Host "health: $($_.Exception.Message)" }
+          if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force } else { Write-Host "exited with $($proc.ExitCode)" }
+          Write-Host '--- stdout'; Get-Content $out -ErrorAction SilentlyContinue
+          Write-Host '--- stderr'; Get-Content $err -ErrorAction SilentlyContinue
+          Write-Host '--- app logs'
+          Get-ChildItem (Join-Path $data 'logs') -Filter 'app*' -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_.Name; Get-Content $_.FullName | Select-Object -Last 30 }
+
       - name: Collect logs
         if: always()
         shell: powershell
