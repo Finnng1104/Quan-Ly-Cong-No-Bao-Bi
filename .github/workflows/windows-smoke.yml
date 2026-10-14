@@ -149,7 +149,7 @@ jobs:
             questionMark_perChar: pw.replace(/[^\x00-\x7F]/g, '?'),
             questionMark_perByte: [...bytes].map((b) => (b > 127 ? '?' : String.fromCharCode(b))).join(''),
             nonAsciiDropped: pw.replace(/[^\x00-\x7F]/g, ''),
-            bomPrefix: '﻿' + pw,
+            bomPrefix: String.fromCharCode(0xFEFF) + pw,
             crSuffix: pw + '\r',
             nfd: pw.normalize('NFD'),
             latin1Mojibake: bytes.toString('latin1'),
@@ -203,11 +203,11 @@ jobs:
           import { createRequire } from 'node:module'
           const serverDir = process.argv[2]
           const { hashPassword, verifyPassword } = await import(pathToFileURL(serverDir + '/dist/shared/password.js').href)
-          for (const [label, value] of [['ascii', 'abc12345'], ['env-password', process.env.ADMIN_PASSWORD], ['vietnamese-literal', 'Mật-khẩu-12345']]) {
+          for (const [label, value] of [['ascii', 'abc12345'], ['env-password', process.env.ADMIN_PASSWORD], ['vietnamese-literal', String.fromCodePoint(77, 0x1EAD, 116, 45, 107, 104, 0x1EA9, 117, 45, 49, 50, 51, 52, 53)]]) {
             const stored = await hashPassword(value)
             console.log('round-trip', label, await verifyPassword(value, stored), 'codepoints:', [...value].map((c) => c.codePointAt(0)).join(','))
           }
-          console.log('env equals literal:', process.env.ADMIN_PASSWORD === 'Mật-khẩu-12345')
+          console.log('env equals literal:', process.env.ADMIN_PASSWORD === String.fromCodePoint(77, 0x1EAD, 116, 45, 107, 104, 0x1EA9, 117, 45, 49, 50, 51, 52, 53))
           '@
           $controlsFile = Join-Path $env:RUNNER_TEMP 'controls.mjs'
           Set-Content -Path $controlsFile -Value $controls -Encoding UTF8

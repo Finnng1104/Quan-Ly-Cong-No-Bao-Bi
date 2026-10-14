@@ -1,11 +1,19 @@
 import readline from 'node:readline'
 import { Writable } from 'node:stream'
 
+/**
+ * Windows tooling (.NET's Process.StandardInput, PowerShell pipes) can put a UTF-8 byte order mark in
+ * front of piped text. It would silently become part of the password and make the account unusable.
+ */
+export function stripByteOrderMark(text: string): string {
+  return text.startsWith('\uFEFF') ? text.slice(1) : text
+}
+
 /** Reads the first line piped into stdin (used by installers: `echo ... | main init-admin --password-stdin`). */
 export async function readLineFromStdin(): Promise<string> {
   const lines = readline.createInterface({ input: process.stdin, terminal: false })
   try {
-    for await (const line of lines) return line
+    for await (const line of lines) return stripByteOrderMark(line)
     return ''
   } finally {
     lines.close()
