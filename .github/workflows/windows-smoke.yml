@@ -197,6 +197,35 @@ jobs:
           Write-Host 'B matches:'
           & $node $file (Join-Path $app 'server') (Join-Path $dirB 'data\app.db')
 
+          # C: is the hash function itself sound on this machine, and which bytes does Node get on stdin?
+          $controls = @'
+          import { pathToFileURL } from 'node:url'
+          import { createRequire } from 'node:module'
+          const serverDir = process.argv[2]
+          const { hashPassword, verifyPassword } = await import(pathToFileURL(serverDir + '/dist/shared/password.js').href)
+          for (const [label, value] of [['ascii', 'abc12345'], ['env-password', process.env.ADMIN_PASSWORD], ['vietnamese-literal', 'Mật-khẩu-12345']]) {
+            const stored = await hashPassword(value)
+            console.log('round-trip', label, await verifyPassword(value, stored), 'codepoints:', [...value].map((c) => c.codePointAt(0)).join(','))
+          }
+          console.log('env equals literal:', process.env.ADMIN_PASSWORD === 'Mật-khẩu-12345')
+          '@
+          $controlsFile = Join-Path $env:RUNNER_TEMP 'controls.mjs'
+          Set-Content -Path $controlsFile -Value $controls -Encoding UTF8
+          Write-Host 'C controls:'
+          & $node $controlsFile (Join-Path $app 'server')
+
+          $dump = 'let n=0;const c=[];process.stdin.on("data",d=>c.push(d));process.stdin.on("end",()=>console.log("node received:",Buffer.concat(c).toString("hex").match(/../g).join(" ")))'
+          $startInfo = New-Object Diagnostics.ProcessStartInfo
+          $startInfo.FileName = $node
+          $startInfo.Arguments = "-e `"$($dump -replace '"','\"')`""
+          $startInfo.UseShellExecute = $false; $startInfo.CreateNoWindow = $true
+          $startInfo.RedirectStandardInput = $true; $startInfo.RedirectStandardOutput = $true
+          $process = [Diagnostics.Process]::Start($startInfo)
+          $process.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+          $process.StandardInput.Close()
+          Write-Host $process.StandardOutput.ReadToEnd()
+          $process.WaitForExit()
+
       # Only on failure: what the scheduled task did, who may write where, and what the server says
       # when started by hand as Administrator (same node.exe, same arguments as the task).
       - name: Diagnostics
