@@ -226,7 +226,10 @@ New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 try {
   $manifestPath = Join-Path $tmp 'manifest.json'
   Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/manifest.json" -OutFile $manifestPath
-  $signature = [Convert]::FromBase64String(([Text.Encoding]::UTF8.GetString((Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/manifest.sig").Content)).Trim())
+  # .Content là byte[] hay string tùy Content-Type mà nơi phát hành trả về; xử lý cả hai.
+  $signatureText = (Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/manifest.sig").Content
+  if ($signatureText -is [byte[]]) { $signatureText = [Text.Encoding]::UTF8.GetString($signatureText) }
+  $signature = [Convert]::FromBase64String($signatureText.Trim())
   if (-not (Test-ManifestSignature ([IO.File]::ReadAllBytes($manifestPath)) $signature)) {
     Stop-Install 'Chữ ký của manifest KHÔNG hợp lệ. Dừng để đảm bảo an toàn.'
   }
