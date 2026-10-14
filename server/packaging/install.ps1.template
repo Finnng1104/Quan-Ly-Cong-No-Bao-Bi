@@ -111,8 +111,8 @@ function Register-ServerTask {
   # Chạy khi khởi động máy, dưới LocalService, không giới hạn thời gian, không phụ thuộc pin.
   $xml = @"
 <?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/Task">
-  <RegistrationInfo><Description>Quản lý công nợ</Description></RegistrationInfo>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>Quan ly cong no</Description></RegistrationInfo>
   <Triggers><BootTrigger><Enabled>true</Enabled></BootTrigger></Triggers>
   <Principals>
     <Principal id="Service">
