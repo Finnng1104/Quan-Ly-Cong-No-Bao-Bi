@@ -190,6 +190,15 @@ function New-DesktopShortcut([int]$Port) {
   }
 }
 
+# Gói được giải nén ở thư mục tạm của người cài rồi Move-Item vào đây: cùng ổ đĩa thì Windows giữ nguyên ACL
+# cũ (chỉ Administrators/SYSTEM), nên tác vụ chạy dưới LocalService bị Access Denied khi mở node.exe.
+# Trả lại quyền kế thừa từ thư mục cha rồi cấp đọc/chạy cho LocalService.
+function Set-AppPermissions([string]$Path) {
+  & icacls.exe $Path /reset /T /C /Q | Out-Null
+  & icacls.exe $Path /grant 'NT AUTHORITY\LocalService:(OI)(CI)RX' /T /C /Q | Out-Null
+  if ($LASTEXITCODE -ne 0) { Stop-Install "Không đặt được quyền cho thư mục ứng dụng: $Path" }
+}
+
 function Stop-ServerTask {
   & schtasks.exe /End /TN $TaskName 2>$null | Out-Null
   # Phòng khi tiến trình con còn sót lại: dừng mọi node.exe chạy từ thư mục ứng dụng.
@@ -287,6 +296,7 @@ try {
 
     New-Item -ItemType Directory -Force -Path $AppRoot, $DataRoot | Out-Null
     Move-Item $newApp $AppDir
+    Set-AppPermissions $AppDir
     Set-Content -Path (Join-Path $DataRoot 'config.json') -Value "{ `"port`": $port }" -Encoding ASCII
     # Dịch vụ chạy dưới LocalService nên cần quyền ghi vào thư mục dữ liệu.
     & icacls.exe $DataRoot /grant 'NT AUTHORITY\LocalService:(OI)(CI)M' /T | Out-Null
@@ -358,6 +368,7 @@ try {
   if (Test-Path $PrevDir) { Remove-Item $PrevDir -Recurse -Force }
   Move-Item $AppDir $PrevDir
   Move-Item $newApp $AppDir
+  Set-AppPermissions $AppDir
 
   Write-Log 'Đang nâng cấp cấu trúc dữ liệu...'
   $migrate = Invoke-Qlcn $AppDir @('migrate', '--data-dir', $DataRoot) $null
