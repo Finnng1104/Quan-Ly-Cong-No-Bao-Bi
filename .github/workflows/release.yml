@@ -1,9 +1,12 @@
-# Builds the install packages for every platform and publishes a signed manifest.
+# Builds the macOS install packages (Apple Silicon + Intel), signs the manifest and publishes it as a
+# GitHub Release of a separate PUBLIC repository (this one is private, customers cannot download from it).
 # Trigger: push a tag such as v1.0.3.
 #
 # Needs (repository settings):
 #   secret   QLCN_SIGNING_KEY          private key PEM from `node server/packaging/manifest.mjs keygen`
-#   variable QLCN_RELEASE_BASE_URL     public URL the files will be served from (no trailing slash)
+#   secret   QLCN_RELEASES_TOKEN       fine-grained token with "Contents: read & write" on the releases repo
+#   variable QLCN_RELEASES_REPO        releases repository, e.g. Finnng1104/qlcn-releases
+#   variable QLCN_RELEASE_BASE_URL     https://github.com/<owner>/<repo>/releases/latest/download
 # And the public keys committed under server/packaging/public-keys/ (main.public.pem, backup.public.pem).
 
 name: release
@@ -18,9 +21,9 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - { os: windows-latest, platform: win-x64 }
+          # Windows is verified separately by windows-smoke.yml; the customer runs macOS.
           - { os: macos-14, platform: darwin-arm64 }
-          - { os: macos-13, platform: darwin-x64 }
+          - { os: macos-15-intel, platform: darwin-x64 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -82,5 +85,12 @@ jobs:
             server/release/manifest.sig.der
             server/release/install.sh
             server/release/install.ps1
-      # Uploading these files to the place customers download from (Cloudflare R2 bucket, GitHub
-      # Releases of a separate repository, ...) is deliberately not decided yet — see PLAN.md §14.
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.QLCN_RELEASES_TOKEN }}
+          RELEASES_REPO: ${{ vars.QLCN_RELEASES_REPO }}
+        working-directory: server/release
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$RELEASES_REPO" \
+            --title "$GITHUB_REF_NAME" --notes "Release $GITHUB_REF_NAME" \
+            *.tar.gz manifest.json manifest.sig manifest.sig.der install.sh install.ps1

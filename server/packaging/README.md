@@ -1,6 +1,7 @@
 # Đóng gói, cài đặt và cập nhật
 
 Tài liệu ngắn về cách phát hành bản cài cho máy khách. Thiết kế đầy đủ ở `../PLAN.md` §11.
+Các bước làm tay từ đầu đến cuối (phát hành, cài qua remote, backup R2) ở `RUNBOOK.md`.
 
 ## Cài đặt trên máy khách
 
@@ -36,7 +37,7 @@ bản `pre-restore` — muốn chắc chắn thì chỉ rõ tên file lấy từ
 1. Tạo khóa (một lần): `node packaging/manifest.mjs keygen main` và `... keygen backup`.
    Giữ khóa **private** ngoài repo (lưu offline một bản). Commit hai file `*.public.pem` vào
    `packaging/public-keys/`.
-2. Gắn tag `vX.Y.Z` — workflow `.github/workflows/release.yml` build 3 nền tảng, ký manifest.
+2. Gắn tag `vX.Y.Z` — workflow `.github/workflows/release.yml` build macOS (arm64 + Intel), ký manifest và đăng lên Release của repo phát hành công khai.
    Hoặc làm tay trên từng máy:
    ```
    node packaging/build-release.mjs --out release --version X.Y.Z
@@ -68,7 +69,6 @@ Gỡ bản thử: `launchctl bootout gui/$(id -u)/vn.qlcn.test` rồi xóa `~/Li
 | macOS (arm64): cài mới, cập nhật 0.0.1→0.0.2, rollback khi bản mới hỏng, manifest bị sửa bị từ chối, chạy lại cùng bản không đổi gì, supervisor chạy lại khi tiến trình bị giết | Đã thử trên máy thật |
 | macOS Intel (x64) | Chưa (cần build trên máy Intel hoặc CI) |
 | macOS: `qlcn` status/backup/backups/restore (theo tên file, theo ngày, file hỏng, hoàn tác) | Đã thử trên máy thật |
-| Windows: `install.ps1`, `qlcn.ps1`, Task Scheduler, `LocalService`, kiểm chữ ký bằng CNG | **Chưa chạy trên Windows thật** |
-| CI workflow `release.yml` | Chưa chạy (cần repo GitHub) |
-| CI `windows-smoke.yml`: cài thật bằng `install.ps1` trên `windows-latest`, health, `qlcn status/backup`, chạy lại | Mới viết, chưa chạy (cần repo GitHub riêng) |
+| Windows: `install.ps1`, `qlcn.ps1`, Task Scheduler, `LocalService`, kiểm chữ ký bằng CNG | Đã chạy trên CI `windows-latest` (cài mới, đăng nhập, backup, chạy lại); chưa thử máy thật |
+| CI workflow `release.yml` (macOS arm64 + Intel, đăng Release) | Chưa chạy (cần secret/variable và repo phát hành, xem `RUNBOOK.md`) |
 | Tự khởi động lại sau khi tắt/mở máy, rút sạc laptop | Chưa |
