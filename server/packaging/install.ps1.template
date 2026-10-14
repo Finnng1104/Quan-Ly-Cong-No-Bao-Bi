@@ -117,7 +117,6 @@ function Register-ServerTask {
   <Principals>
     <Principal id="Service">
       <UserId>S-1-5-19</UserId>
-      <LogonType>ServiceAccount</LogonType>
       <RunLevel>LeastPrivilege</RunLevel>
     </Principal>
   </Principals>
