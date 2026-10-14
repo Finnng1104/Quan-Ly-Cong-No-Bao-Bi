@@ -98,22 +98,22 @@ const OrderTicket = forwardRef(function OrderTicket(
           <>
             <div className="flex justify-between text-slate-500">
               <span>Tổng hàng bán</span>
-              <span className="tabular-nums">{fmtMoney(linesTotal + returnTotal)} đ</span>
+              <span className="tabular-nums">{fmtMoney(linesTotal + returnTotal)}</span>
             </div>
             <div className="flex justify-between text-amber-700">
               <span>Hàng trả</span>
-              <span className="tabular-nums">-{fmtMoney(returnTotal)} đ</span>
+              <span className="tabular-nums">-{fmtMoney(returnTotal)}</span>
             </div>
           </>
         )}
         <div className="flex justify-between">
           <span className="font-semibold">TỔNG ĐƠN HÀNG</span>
-          <b className="tabular-nums">{fmtMoney(linesTotal)} đ</b>
+          <b className="tabular-nums">{fmtMoney(linesTotal)}</b>
         </div>
         {(order.fees || []).map((f) => (
           <div key={f.id} className="flex justify-between text-cyan-700">
             <span>{f.name || 'Chi phí phát sinh'}</span>
-            <span className="tabular-nums">+{fmtMoney(f.amount)} đ</span>
+            <span className="tabular-nums">+{fmtMoney(f.amount)}</span>
           </div>
         ))}
         {order.vat?.amount > 0 && (
@@ -121,24 +121,24 @@ const OrderTicket = forwardRef(function OrderTicket(
             <span>
               Tiền VAT hóa đơn{order.vat.manual ? ' (nhập tay)' : ` (${order.vat.rate}%)`}
             </span>
-            <span className="tabular-nums">+{fmtMoney(order.vat.amount)} đ</span>
+            <span className="tabular-nums">+{fmtMoney(order.vat.amount)}</span>
           </div>
         )}
         {hasExtras && (
           <div className="flex justify-between text-[15px]">
             <span className="font-bold">TỔNG CỘNG</span>
-            <b className="tabular-nums">{fmtMoney(order.total)} đ</b>
+            <b className="tabular-nums">{fmtMoney(order.total)}</b>
           </div>
         )}
         {showDebt && (
           <>
             <div className="flex justify-between text-slate-600">
               <span>CÔNG NỢ CŨ</span>
-              <span className="tabular-nums">{fmtMoney(oldDebt)} đ</span>
+              <span className="tabular-nums">{fmtMoney(oldDebt)}</span>
             </div>
             <div className="flex justify-between rounded-lg bg-slate-100 px-2 py-1.5 text-[14.5px]">
               <span className="font-bold">CÔNG NỢ MỚI</span>
-              <b className="tabular-nums">{fmtMoney(newDebt)} đ</b>
+              <b className="tabular-nums">{fmtMoney(newDebt)}</b>
             </div>
           </>
         )}
