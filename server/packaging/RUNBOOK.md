@@ -31,32 +31,12 @@ git push finn v0.1.0        # repo có secret ở trên
 Workflow `release` build hai gói (Apple Silicon, Intel), ký manifest rồi tạo Release `v0.1.0` ở repo phát hành.
 Xong khi tab Actions xanh và Release có đủ `install.sh`, `manifest.json`, `manifest.sig`, hai file `.tar.gz`.
 
-## C. Cài trên máy khách (qua AnyDesk/RustDesk)
+## C. Cài và cập nhật trên máy khách
 
-Trước giờ hẹn hỏi khách: Mac chip gì (Apple menu → About This Mac), đang đăng nhập tài khoản nào, và có
-mở sẵn được Terminal không.
+Xem `HUONG-DAN-CAI-DAT.md` (lệnh cài, danh sách kiểm tra, `qlcn update`). Hướng dẫn cho chủ shop ở
+`HUONG-DAN-SU-DUNG.md`.
 
-1. Mở **Terminal** trên máy khách (không cần sudo).
-2. Chạy:
-   ```
-   curl -fsSL https://github.com/Finnng1104/qlcn-releases/releases/latest/download/install.sh | bash
-   ```
-3. Script hỏi tên đăng nhập và mật khẩu của chủ shop (hoặc để chủ shop tự gõ). Chờ tới khi báo cài xong
-   và mở trình duyệt tại `http://localhost:8686`.
-4. Kiểm tra:
-   - Đăng nhập được bằng tài khoản vừa tạo.
-   - Tạo thử một khách hàng và một đơn.
-   - `qlcn status` hiện dịch vụ đang chạy; `qlcn backup` báo thành công.
-5. **Đăng xuất rồi đăng nhập lại** (hoặc khởi động lại máy) và mở lại `http://localhost:8686`: dịch vụ phải
-   tự lên. Dịch vụ chạy theo *tài khoản đang đăng nhập* (LaunchAgent), nên máy chưa đăng nhập thì chưa chạy.
-6. Cài app vào Dock/Home Screen từ trình duyệt (Chrome/Edge: Install; Safari: Add to Dock) cho chủ shop.
-
-## D. Cập nhật
-
-Phát hành tag mới (mục B), rồi chạy lại đúng lệnh ở mục C. Script tự sao lưu, thay bản, kiểm tra, và
-quay lại bản cũ nếu bản mới không chạy.
-
-## E. Khi có sự cố
+## D. Khi có sự cố
 
 | Triệu chứng | Làm gì |
 |---|---|
@@ -66,7 +46,7 @@ quay lại bản cũ nếu bản mới không chạy.
 | Cần gửi log | `qlcn doctor` tạo file chẩn đoán (không có dữ liệu khách) |
 | Cài đặt lỗi | Log ở `~/Library/Application Support/QuanLyCongNo/logs/install-*.log` |
 
-## F. Backup lên R2 (khi có tài khoản Cloudflare)
+## E. Backup lên R2 (khi có tài khoản Cloudflare)
 
 Mỗi shop một bucket và một token chỉ có quyền Object Read & Write trên bucket đó. Thêm vào
 `~/Library/Application Support/QuanLyCongNo/config.json` rồi `qlcn restart`:

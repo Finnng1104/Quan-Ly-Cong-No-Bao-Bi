@@ -21,6 +21,7 @@ macOS chỉ khi `/usr/local/bin` ghi được không cần sudo — nếu không
 ```
 qlcn status                 phiên bản, cổng, dịch vụ, /api/health
 qlcn start | stop | restart dịch vụ chạy nền (Windows: PowerShell "Run as administrator")
+qlcn update                 tải và cài bản mới nhất (tự sao lưu, tự quay lại nếu lỗi)
 qlcn backup                 sao lưu ngay, dịch vụ vẫn chạy
 qlcn backups                liệt kê bản sao lưu trên máy
 qlcn restore <file|ngày>    tự dừng dịch vụ → khôi phục → bật lại; ngày theo giờ VN (YYYY-MM-DD)
