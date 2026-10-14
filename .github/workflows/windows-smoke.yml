@@ -168,6 +168,35 @@ jobs:
           $app = Join-Path $env:ProgramFiles 'QuanLyCongNo\app'
           & (Join-Path $app 'runtime\node.exe') $file (Join-Path $app 'server') (Join-Path $env:ProgramData 'QuanLyCongNo\data\app.db')
 
+          # Same check on a throwaway data dir, feeding the password the two ways we know about.
+          $node = Join-Path $app 'runtime\node.exe'
+          $main = Join-Path $app 'server\dist\main.js'
+          $password = $env:ADMIN_PASSWORD
+          Write-Host ('expected stdin bytes: ' + ((New-Object Text.UTF8Encoding($false)).GetBytes($password + "`n") | ForEach-Object { $_.ToString('x2') }) -join ' ')
+
+          # A: raw UTF-8 bytes through .NET Process (what install.ps1 does)
+          $dirA = Join-Path $env:RUNNER_TEMP 'probe-a'; New-Item -ItemType Directory -Force $dirA | Out-Null
+          $startInfo = New-Object Diagnostics.ProcessStartInfo
+          $startInfo.FileName = $node
+          $startInfo.Arguments = "`"$main`" init-admin --data-dir `"$dirA`" --username probe --password-stdin"
+          $startInfo.UseShellExecute = $false; $startInfo.CreateNoWindow = $true
+          $startInfo.RedirectStandardInput = $true; $startInfo.RedirectStandardOutput = $true; $startInfo.RedirectStandardError = $true
+          $process = [Diagnostics.Process]::Start($startInfo)
+          $bytes = (New-Object Text.UTF8Encoding($false)).GetBytes("$password`n")
+          $process.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+          $process.StandardInput.Close()
+          Write-Host ('A stdout: ' + $process.StandardOutput.ReadToEnd() + $process.StandardError.ReadToEnd())
+          $process.WaitForExit()
+          Write-Host 'A matches:'
+          & $node $file (Join-Path $app 'server') (Join-Path $dirA 'data\app.db')
+
+          # B: plain PowerShell pipe with the global encoding set to UTF-8
+          $dirB = Join-Path $env:RUNNER_TEMP 'probe-b'; New-Item -ItemType Directory -Force $dirB | Out-Null
+          $global:OutputEncoding = New-Object Text.UTF8Encoding($false)
+          $password | & $node $main init-admin --data-dir $dirB --username probe --password-stdin
+          Write-Host 'B matches:'
+          & $node $file (Join-Path $app 'server') (Join-Path $dirB 'data\app.db')
+
       # Only on failure: what the scheduled task did, who may write where, and what the server says
       # when started by hand as Administrator (same node.exe, same arguments as the task).
       - name: Diagnostics
