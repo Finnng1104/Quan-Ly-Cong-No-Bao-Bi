@@ -69,13 +69,15 @@ fs.cpSync(path.join(serverDir, 'src', 'db', 'migrations'), path.join(distStage, 
   filter: (source) => !source.endsWith('.gitkeep'),
 })
 
-// 2. production dependencies, installed with this Node so the native addon matches the runtime
+// 2. production dependencies. --ignore-scripts: the lockfile has no `hasInstallScript` flag for
+// better-sqlite3, so npm would otherwise run `node-gyp rebuild` and need a C++ toolchain (absent on
+// Windows runners). It ships N-API prebuilds for every platform, which is all it needs at runtime.
 fs.writeFileSync(
   path.join(serverStage, 'package.json'),
   JSON.stringify({ ...serverPackage, version, scripts: undefined, devDependencies: undefined }, null, 2),
 )
 fs.copyFileSync(path.join(serverDir, 'package-lock.json'), path.join(serverStage, 'package-lock.json'))
-run(npm, ['ci', '--omit=dev', '--no-audit', '--no-fund'], {
+run(npm, ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], {
   cwd: serverStage,
   shell: process.platform === 'win32',
 })

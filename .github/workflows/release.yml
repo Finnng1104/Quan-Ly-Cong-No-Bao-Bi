@@ -30,7 +30,8 @@ jobs:
       - name: Install web dependencies
         run: npm ci
       - name: Install server dependencies
-        run: npm ci
+        # No install scripts: better-sqlite3 ships prebuilds, and its implicit node-gyp rebuild needs MSVC.
+        run: npm ci --ignore-scripts
         working-directory: server
       - name: Build release package
         shell: bash
