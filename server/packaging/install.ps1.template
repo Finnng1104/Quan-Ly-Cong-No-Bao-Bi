@@ -176,6 +176,21 @@ function Install-SupportCommand {
   Write-Log 'Lệnh hỗ trợ: qlcn (mở cửa sổ PowerShell mới để dùng)'
 }
 
+# Lối tắt ở Desktop dùng chung để chủ cửa hàng không phải nhớ địa chỉ. Tên không dấu để không phụ thuộc mã hóa file.
+function New-DesktopShortcut([int]$Port) {
+  # Bản thử (QLCN_TASK khác mặc định) không để lại lối tắt trên máy.
+  if ($TaskName -ne 'QuanLyCongNo') { return }
+  try {
+    $desktop = Join-Path $env:PUBLIC 'Desktop'
+    if (-not (Test-Path $desktop)) { return }
+    Set-Content -Path (Join-Path $desktop 'Quan Ly Cong No.url') -Encoding ASCII -Value @(
+      '[InternetShortcut]', "URL=http://localhost:$Port/"
+    )
+  } catch {
+    Write-Log "Không tạo được lối tắt ở Desktop: $($_.Exception.Message)"
+  }
+}
+
 function Stop-ServerTask {
   & schtasks.exe /End /TN $TaskName 2>$null | Out-Null
   # Phòng khi tiến trình con còn sót lại: dừng mọi node.exe chạy từ thư mục ứng dụng.
@@ -192,7 +207,14 @@ function Start-ServerTask {
 function Invoke-Qlcn([string]$AppPath, [string[]]$Arguments, [string]$StdIn) {
   $node = Join-Path $AppPath 'runtime\node.exe'
   $main = Join-Path $AppPath 'server\dist\main.js'
-  if ($StdIn) { $output = $StdIn | & $node $main @Arguments 2>&1 } else { $output = & $node $main @Arguments 2>&1 }
+  if ($StdIn) {
+    # PowerShell 5.1 mã hóa dữ liệu pipe vào chương trình ngoài bằng ASCII: mật khẩu có dấu sẽ thành "?".
+    $previousEncoding = $OutputEncoding
+    $OutputEncoding = New-Object Text.UTF8Encoding($false)
+    try { $output = $StdIn | & $node $main @Arguments 2>&1 } finally { $OutputEncoding = $previousEncoding }
+  } else {
+    $output = & $node $main @Arguments 2>&1
+  }
   $output | ForEach-Object { Add-Content -Path $Script:LogFile -Value $_ -Encoding UTF8 }
   return @{ ExitCode = $LASTEXITCODE; Output = $output }
 }
@@ -248,7 +270,8 @@ try {
 
   $extract = Join-Path $tmp 'extract'
   New-Item -ItemType Directory -Force -Path $extract | Out-Null
-  & tar.exe -xzf $archive -C $extract
+  # Tên đầy đủ để không dính tar của Git (GNU tar hiểu "C:\..." là máy từ xa).
+  & (Join-Path $env:SystemRoot 'System32\tar.exe') -xzf $archive -C $extract
   if ($LASTEXITCODE -ne 0) { Stop-Install 'Giải nén gói thất bại (cần Windows 10 trở lên có tar.exe).' }
   $newApp = Join-Path $extract "qlcn-$target-$Platform"
   if (-not (Test-Path (Join-Path $newApp 'runtime\node.exe'))) { Stop-Install 'Gói không hợp lệ (thiếu runtime).' }
@@ -288,6 +311,7 @@ try {
     Start-ServerTask
     if (-not (Wait-Healthy $port)) { Stop-Install "Dịch vụ không khởi động được trong $HealthTimeoutSeconds giây (xem $LogDir)" }
 
+    New-DesktopShortcut $port
     Write-Log "Cài đặt xong. Ứng dụng chạy tại http://localhost:$port"
     if (-not $env:QLCN_NO_OPEN) { Start-Process "http://localhost:$port" }
     return

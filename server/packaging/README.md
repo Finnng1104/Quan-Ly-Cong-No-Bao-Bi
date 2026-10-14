@@ -44,6 +44,10 @@ bản `pre-restore` — muốn chắc chắn thì chỉ rõ tên file lấy từ
         --key <main.private.pem> --public-key <main.public.pem> --public-key <backup.public.pem>
    ```
 3. Đưa nội dung thư mục `release/` (các `.tar.gz`, `manifest.*`, `install.sh`, `install.ps1`) lên nơi phát hành.
+   **`install.ps1` phải được phục vụ với `Content-Type: text/plain; charset=utf-8`.** Thiếu charset thì
+   Windows PowerShell 5.1 (`irm | iex`) đọc theo ISO-8859-1 và thông báo tiếng Việt bị lỗi chữ. Đừng thêm BOM:
+   BOM làm hỏng dòng đầu khi chạy qua `iex`. Với R2 đặt metadata lúc upload, ví dụ
+   `aws s3 cp install.ps1 s3://<bucket>/ --content-type "text/plain; charset=utf-8"`.
 
 ## Thử cài trên máy mình mà không đụng bản thật
 
@@ -65,5 +69,6 @@ Gỡ bản thử: `launchctl bootout gui/$(id -u)/vn.qlcn.test` rồi xóa `~/Li
 | macOS Intel (x64) | Chưa (cần build trên máy Intel hoặc CI) |
 | macOS: `qlcn` status/backup/backups/restore (theo tên file, theo ngày, file hỏng, hoàn tác) | Đã thử trên máy thật |
 | Windows: `install.ps1`, `qlcn.ps1`, Task Scheduler, `LocalService`, kiểm chữ ký bằng CNG | **Chưa chạy trên Windows thật** |
-| CI workflow | Chưa chạy (cần repo GitHub) |
+| CI workflow `release.yml` | Chưa chạy (cần repo GitHub) |
+| CI `windows-smoke.yml`: cài thật bằng `install.ps1` trên `windows-latest`, health, `qlcn status/backup`, chạy lại | Mới viết, chưa chạy (cần repo GitHub riêng) |
 | Tự khởi động lại sau khi tắt/mở máy, rút sạc laptop | Chưa |

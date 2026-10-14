@@ -135,7 +135,13 @@ if (values['simulate-broken']) {
 // 6. archive: tar.gz works on macOS, Linux and Windows 10+ (bsdtar ships with Windows)
 const archivePath = path.join(outDir, `${archiveBase}.tar.gz`)
 fs.rmSync(archivePath, { force: true })
-run('tar', ['-czf', archivePath, '-C', stageRoot, archiveBase])
+// On Windows, name the system bsdtar explicitly: Git's GNU tar can come first on PATH and reads
+// `D:\path` as a remote host.
+const tar =
+  process.platform === 'win32'
+    ? path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
+    : 'tar'
+run(tar, ['-czf', archivePath, '-C', stageRoot, archiveBase])
 
 const sha256 = createHash('sha256').update(fs.readFileSync(archivePath)).digest('hex')
 const size = fs.statSync(archivePath).size
