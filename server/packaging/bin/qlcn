@@ -2,7 +2,7 @@
 # qlcn — lệnh hỗ trợ cho bản cài trên macOS (người hỗ trợ dùng, không phải chủ cửa hàng).
 #
 # Nằm trong gói cài tại <thư mục dữ liệu>/app/bin/qlcn. Installer ghi <thư mục dữ liệu>/install.env
-# (LABEL, PLIST) để lệnh này biết dịch vụ chạy nền tên gì; mọi thứ khác suy ra từ vị trí của file.
+# (LABEL, PLIST, BASE_URL) để lệnh này biết dịch vụ chạy nền tên gì; mọi thứ khác suy ra từ vị trí của file.
 
 set -euo pipefail
 
@@ -25,6 +25,7 @@ UID_NUM="$(id -u)"
 
 LABEL=""
 PLIST=""
+BASE_URL=""
 # shellcheck source=/dev/null
 [ -f "$INSTALL_ENV" ] && . "$INSTALL_ENV"
 LABEL="${LABEL:-vn.qlcn.server}"
@@ -37,6 +38,7 @@ Cách dùng: qlcn <lệnh>
   status              Phiên bản, cổng, tình trạng dịch vụ và bản sao lưu gần nhất
   start | stop | restart
                       Bật / tắt / khởi động lại dịch vụ chạy nền
+  update              Tải và cài bản mới nhất (tự sao lưu, tự quay lại bản cũ nếu bản mới lỗi)
   backup              Sao lưu ngay (dịch vụ vẫn chạy bình thường)
   backups             Liệt kê các bản sao lưu trên máy
   restore <file|ngày> Thay dữ liệu bằng một bản sao lưu (ngày dạng YYYY-MM-DD = bản mới nhất ngày đó).
@@ -146,6 +148,24 @@ cmd_restore() {
   return "$status"
 }
 
+cmd_update() {
+  [ -n "$BASE_URL" ] || {
+    echo "Bản cài này chưa lưu địa chỉ phát hành. Chạy lại lệnh cài đặt gốc để cập nhật." >&2
+    return 1
+  }
+  local installer
+  installer="$DATA_DIR/logs/update-installer.sh"
+  curl -fsSL "$BASE_URL/install.sh" -o "$installer" || {
+    echo "Không tải được bản cài từ $BASE_URL (kiểm tra kết nối mạng)." >&2
+    rm -f "$installer"
+    return 1
+  }
+  # The installer replaces this very script on disk; `exec` hands the process over first so bash
+  # never reads a half-replaced file.
+  export QLCN_HOME="$DATA_DIR" QLCN_LABEL="$LABEL" QLCN_BASE_URL="$BASE_URL"
+  exec bash "$installer"
+}
+
 cmd_doctor() {
   local output file
   output="$(run_main doctor)"
@@ -161,6 +181,7 @@ case "$command" in
   start) service_start ;;
   stop) service_stop && echo "Đã dừng dịch vụ." ;;
   restart) service_stop && service_start ;;
+  update) cmd_update ;;
   backup) run_main backup ;;
   backups) cmd_backups ;;
   restore) cmd_restore "$@" ;;

@@ -129,7 +129,8 @@ PLIST_EOF
 
 # Lệnh hỗ trợ `qlcn` (nằm trong gói) cần biết tên dịch vụ; đưa nó lên PATH nếu không cần sudo.
 install_support_command() {
-  printf 'LABEL=%q\nPLIST=%q\n' "$LABEL" "$PLIST" > "$HOME_DIR/install.env"
+  # BASE_URL lets `qlcn update` fetch the next installer from the same place this one came from.
+  printf 'LABEL=%q\nPLIST=%q\nBASE_URL=%q\n' "$LABEL" "$PLIST" "$BASE_URL" > "$HOME_DIR/install.env"
   [ -x "$APP_DIR/bin/qlcn" ] || return 0
   # Bản thử (QLCN_LABEL khác mặc định) không được chiếm lệnh `qlcn` của bản thật.
   if [ "$LABEL" = vn.qlcn.server ] && [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
