@@ -46,26 +46,39 @@ Xem `HUONG-DAN-CAI-DAT.md` (lệnh cài, danh sách kiểm tra, `qlcn update`). 
 | Cần gửi log | `qlcn doctor` tạo file chẩn đoán (không có dữ liệu khách) |
 | Cài đặt lỗi | Log ở `~/Library/Application Support/QuanLyCongNo/logs/install-*.log` |
 
-## E. Backup lên R2 (khi có tài khoản Cloudflare)
+## E. Sao lưu ra ổ cứng ngoài và/hoặc R2
 
-Mỗi shop một bucket và một token chỉ có quyền Object Read & Write trên bucket đó. Thêm vào
-`~/Library/Application Support/QuanLyCongNo/config.json` rồi `qlcn restart`:
+Hai nơi lưu ngoài máy, dùng được riêng hoặc cùng lúc (khách chọn theo nhu cầu):
 
-```json
-{
-  "backup": {
-    "localRetention": 7,
-    "destinations": [
-      {
-        "type": "s3",
-        "endpoint": "https://<account-id>.r2.cloudflarestorage.com",
-        "bucket": "qlcn-<ten-shop>",
-        "accessKeyId": "...",
-        "secretAccessKey": "..."
-      }
-    ]
-  }
-}
+**Ổ cứng ngoài** (không cần mạng, không đưa dữ liệu lên internet): khách tự bật trong app, ở
+Cài đặt → Sao lưu dữ liệu → *Bật sao lưu ra ổ cứng ngoài*, chọn ổ đang cắm và cách dùng
+(*Cắm thường xuyên* hoặc *Thỉnh thoảng mới cắm*). Bản sao nằm trong thư mục `QuanLyCongNo-SaoLuu` trên ổ.
+- Ổ chưa cắm: bản sao xếp hàng, cắm lại thì tự chép phần còn thiếu (trong vòng 1 phút).
+- Cắm thường xuyên: cảnh báo nếu quá 48 giờ chưa chép được. Thỉnh thoảng cắm: chỉ nhắc sau 14 ngày.
+- App giữ 30 bản mới nhất trên ổ (`backup.destinationRetention`).
+- **macOS hỏi quyền** truy cập ổ đĩa rời lần đầu: chọn Cho phép. Nếu lỡ từ chối: Cài đặt hệ thống →
+  Quyền riêng tư & Bảo mật → Tệp và thư mục (hoặc Truy cập toàn bộ ổ đĩa) → bật cho `node`.
+- Dữ liệu trên ổ không mã hóa: khuyên khách định dạng ổ kiểu APFS (Mã hóa) trong Disk Utility.
+
+**R2 (online).** Mỗi shop một bucket và một token chỉ có quyền Object Read & Write trên bucket đó (Cloudflare →
+R2 → tạo bucket → *Manage API tokens* → *Object Read & Write*, chọn đúng bucket).
+
+Kết nối bằng một lệnh, hỏi lần lượt Account ID, tên bucket, Access Key ID, Secret:
+
+```
+qlcn backup-setup
 ```
 
-Kiểm tra bằng `qlcn backup`. Giữ bản cũ bằng *lifecycle rule* của bucket (app không tự xóa trên cloud).
+Lệnh tự thử kết nối (liệt kê, ghi, xóa một file thử), lưu vào `config.json` (quyền chỉ chủ file đọc),
+khởi động lại dịch vụ và sao lưu thử một bản. Sai quyền hoặc sai tên bucket thì báo lỗi và không ghi gì.
+Chạy không cần hỏi: đặt `QLCN_R2_ACCOUNT_ID`, `QLCN_R2_BUCKET`, `QLCN_R2_ACCESS_KEY_ID`,
+`QLCN_R2_SECRET_ACCESS_KEY` (tùy chọn `QLCN_R2_PREFIX`) trước lệnh.
+
+Cách hoạt động:
+- Mỗi bản sao lưu local được đẩy lên bucket. Mất mạng thì bản đó xếp hàng và tự đẩy lại (mỗi 10 phút)
+  khi có mạng, kể cả sau khi tắt/bật máy.
+- App tự giữ 30 bản mới nhất trên bucket (`backup.destinationRetention` trong `config.json`, 3–365) và
+  xóa bản cũ hơn, nên không cần lifecycle rule.
+- Trong app: Cài đặt → **Sao lưu dữ liệu** có nút *Sao lưu ngay*, danh sách bản (trên máy / online) và
+  nút *Khôi phục*. Khôi phục tự lưu dữ liệu hiện tại trước, rồi app tự khởi động lại (vài giây).
+  Khôi phục đưa cả mật khẩu và phiên đăng nhập về thời điểm của bản đó.

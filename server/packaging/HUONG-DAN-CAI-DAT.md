@@ -29,7 +29,8 @@ Q="$HOME/Library/Application Support/QuanLyCongNo/app/bin/qlcn"
 - [ ] `"$Q" status` báo dịch vụ chạy và sức khỏe `ok`; `"$Q" backup` thành công.
 - [ ] **Đăng xuất macOS rồi đăng nhập lại**, mở lại http://localhost:8686: phải tự lên (báo khách trước
       vì remote sẽ bị ngắt).
-- [ ] `"$Q" backups` liệt kê bản vừa tạo. Backup tự chạy sau đó theo sự kiện (24 giờ / 6 giờ), giữ 7 bản; bản ngoài máy (R2) bật sau theo `RUNBOOK.md` mục E.
+- [ ] `"$Q" backups` liệt kê bản vừa tạo. Backup tự chạy sau đó theo sự kiện (24 giờ / 6 giờ), giữ 7 bản; bản ngoài máy (R2) bật bằng `"$Q" backup-setup` (xem `RUNBOOK.md` mục E).
+- [ ] Cài đặt → Sao lưu dữ liệu: bấm *Sao lưu ngay*, thấy bản mới trong danh sách (và nhãn Online nếu đã bật R2).
 - [ ] Cài vào Dock (Chrome/Edge: Install; Safari: File → Add to Dock).
 - [ ] Điền tên và số điện thoại hỗ trợ vào `HUONG-DAN-SU-DUNG.md` rồi gửi khách.
 
