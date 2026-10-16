@@ -131,6 +131,20 @@ export const api = {
     customerDebts: async (asOf) => (await request('GET', '/reports/customer-debts', { query: { asOf } })).items,
   },
 
+  backups: {
+    /** { cloud: { configured, reachable }, lastBackupAt, lastCloudBackupAt, items: [{ fileName, createdAt, trigger, sizeBytes, onDevice, online }] } */
+    list: () => request('GET', '/backups'),
+    /** { fileName, sizeBytes, uploaded, copiedToDrive }: each true | false | null (null = not set up). */
+    create: () => request('POST', '/backups'),
+    /** Mounted external drives that can be chosen: [{ name }]. */
+    drives: async () => (await request('GET', '/backups/drives')).drives,
+    /** Chooses (or re-configures) the external drive. `volume` may be omitted to only change `mode`. */
+    setDrive: ({ volume, mode }) => request('PUT', '/backups/drive', { body: { volume, mode } }),
+    removeDrive: () => request('DELETE', '/backups/drive'),
+    /** Starts the restore; the server restarts itself a moment later. */
+    restore: (fileName) => request('POST', '/backups/restore', { body: { fileName } }),
+  },
+
   /** { status: 'ok' | 'warning' | 'error', warnings: string[], lastBackup }. Needs no login. */
   health: () => request('GET', '/health'),
 

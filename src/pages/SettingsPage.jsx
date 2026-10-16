@@ -13,6 +13,7 @@ import { useAction } from '../hooks/useAction'
 import { todayISO, toCsv, downloadText } from '../lib/format'
 import { Card, Button, Field, Input, Switch } from '../components/ui'
 import { useToast } from '../components/Toast'
+import BackupCard from '../components/BackupCard'
 
 export default function SettingsPage() {
   const data = useStore()
@@ -208,6 +209,8 @@ export default function SettingsPage() {
           Dữ liệu được lưu trên máy chủ của cửa hàng và sao lưu tự động.
         </p>
       </Card>
+
+      <BackupCard />
 
       <Button
         variant="danger"
