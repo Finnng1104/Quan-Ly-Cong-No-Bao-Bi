@@ -8,12 +8,14 @@ import Fastify, {
   type FastifyInstance,
 } from 'fastify'
 import type { Logger } from 'pino'
+import type { BackupDestination } from './config/index.js'
 import { canQueryDatabase, type Database } from './db/client.js'
 import { getSchemaVersion } from './db/migrate.js'
 import { registerAuthHook } from './http/auth-hook.js'
 import type { AppContext } from './http/context.js'
 import { registerAdjustmentRoutes } from './modules/adjustments/routes.js'
 import { registerAuthRoutes } from './modules/auth/routes.js'
+import { registerBackupRoutes, type BackupRoutesOptions, type MaintenanceState } from './modules/backup/routes.js'
 import { backupHealth } from './modules/backup/service.js'
 import { registerCatalogRoutes } from './modules/catalog/routes.js'
 import { registerCustomerRoutes } from './modules/customers/routes.js'
@@ -35,10 +37,12 @@ export interface BuildAppOptions {
   version: string
   /** Injectable clock so session expiry and "today" can be tested. */
   now?: () => Date
-  /** Whether a cloud backup destination is configured, so /api/health can warn when it is stale. */
-  hasCloudBackup?: boolean
+  /** Current backup destinations, read on each health check so a drive chosen in Settings counts at once. */
+  backupDestinations?: () => readonly BackupDestination[]
   /** Called after any successful write request; lets the backup scheduler know data changed. */
   onDataChanged?: () => void
+  /** Enables the in-app backup list, "back up now" and restore. Absent in tests that do not need it. */
+  backup?: Omit<BackupRoutesOptions, 'maintenance'>
   /** Folder with the built web app. When set, the server also serves it (single-process install). */
   webRoot?: string
   /** Public https origins when hosted online (see AppConfig.publicOrigins). Empty or absent locally. */
@@ -77,6 +81,16 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   registerRequestGuard(app, { port: options.port, publicOrigins: options.publicOrigins ?? [] })
   await app.register(cookie)
   registerAuthHook(app, ctx)
+
+  // Once a restore is staged the database is about to be swapped; refuse writes (and reads of
+  // soon-stale data) until the process has restarted. The health check stays up for the browser to poll.
+  const maintenance: MaintenanceState = { restoring: false }
+  app.addHook('onRequest', async (request) => {
+    const path = request.url.split('?')[0] ?? ''
+    if (maintenance.restoring && path.startsWith('/api/') && path !== '/api/health') {
+      throw new AppError('UNAVAILABLE', 'Đang khôi phục dữ liệu, vui lòng đợi vài giây')
+    }
+  })
 
   app.addHook('onSend', async (request, reply) => {
     reply.header('x-request-id', request.id)
@@ -135,7 +149,13 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     }
     if (dbOk) {
       try {
-        backups = backupHealth(db, ctx.now(), options.hasCloudBackup ?? false)
+        const destinations = options.backupDestinations?.() ?? []
+        backups = backupHealth(
+          db,
+          ctx.now(),
+          destinations.some((destination) => destination.type === 's3'),
+          destinations.filter((destination) => destination.type === 'folder'),
+        )
       } catch (error) {
         // The health check itself must never fail because backup bookkeeping is unreadable.
         ctx.logger.error({ component: 'health', err: error }, 'cannot read backup status')
@@ -164,6 +184,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   registerLedgerRoutes(app, ctx)
   registerReportRoutes(app, ctx)
   registerSystemRoutes(app, ctx)
+  if (options.backup) registerBackupRoutes(app, { ...options.backup, maintenance })
 
   return app
 }

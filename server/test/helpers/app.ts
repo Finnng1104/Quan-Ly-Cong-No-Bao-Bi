@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url'
 import type { FastifyInstance } from 'fastify'
-import { buildApp } from '../../src/app.js'
+import { buildApp, type BuildAppOptions } from '../../src/app.js'
 import { openDatabase, type Database } from '../../src/db/client.js'
 import { loadMigrationFiles, runMigrations } from '../../src/db/migrate.js'
 import { createUser } from '../../src/modules/auth/service.js'
@@ -41,7 +41,9 @@ export interface TestApp {
 }
 
 /** A fully migrated in-memory app with an admin user already logged in. */
-export async function createTestApp(options: { now?: Date } = {}): Promise<TestApp> {
+export async function createTestApp(
+  options: { now?: Date; backup?: (db: Database) => NonNullable<BuildAppOptions['backup']> } = {},
+): Promise<TestApp> {
   const db = openDatabase(':memory:')
   runMigrations(db, loadMigrationFiles(MIGRATIONS_DIR))
   const capture = createCaptureLogger()
@@ -53,6 +55,7 @@ export async function createTestApp(options: { now?: Date } = {}): Promise<TestA
     logger: capture.logger,
     version: 'test',
     now: () => currentNow,
+    ...(options.backup ? { backup: options.backup(db) } : {}),
   })
 
   await createUser(

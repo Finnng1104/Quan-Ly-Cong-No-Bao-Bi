@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import type { Logger } from 'pino'
-import { NON_RETRYABLE_EXIT_CODES } from './shared/exit-codes.js'
+import { EXIT_CODE, NON_RETRYABLE_EXIT_CODES } from './shared/exit-codes.js'
 
 export interface SupervisorOptions {
   command: string
@@ -110,6 +110,12 @@ export function startSupervisor(options: SupervisorOptions): SupervisorHandle {
       const ranMs = Date.now() - startedAt
 
       if (stopping) return { reason: 'stopped', lastExitCode: exit.code }
+
+      if (exit.code === EXIT_CODE.RESTART_REQUESTED) {
+        // A deliberate stop, so it must not count as a crash or slow the next start down.
+        log.info({ ranMs }, 'server asked to be restarted')
+        continue
+      }
 
       log.warn(
         { exitCode: exit.code, signal: exit.signal, ranMs, err: exit.spawnError },

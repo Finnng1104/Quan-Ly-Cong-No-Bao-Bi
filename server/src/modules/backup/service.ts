@@ -5,21 +5,23 @@ import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { createGzip } from 'node:zlib'
 import type { Logger } from 'pino'
-import type { BackupConfig, BackupDestination, S3BackupDestination } from '../../config/index.js'
+import type { BackupConfig, FolderBackupDestination } from '../../config/index.js'
 import type { Database } from '../../db/client.js'
-import { signRequest } from './sigv4.js'
+import { BACKUP_FILE_NAME_PATTERN } from './cloud.js'
+import { createStores, type BackupStore } from './stores.js'
 
 export type BackupTrigger = 'startup' | 'periodic' | 'pre-update' | 'pre-restore' | 'manual'
 
 /** Snapshots taken for safety around risky operations are retained separately from routine ones. */
 const SAFETY_TRIGGERS: readonly BackupTrigger[] = ['pre-update', 'pre-restore']
 const SAFETY_SNAPSHOTS_TO_KEEP = 3
-const UPLOAD_TIMEOUT_MS = 5 * 60_000
-const FILE_NAME_PATTERN = /^qlcn-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z)-([a-z-]+)\.db\.gz$/
 
 export interface DestinationOutcome {
   destination: string
+  kind?: BackupStore['kind']
   ok: boolean
+  /** The drive is not plugged in: normal for an occasional drive, retried as soon as it appears. */
+  unavailable?: boolean
   error?: string
 }
 
@@ -40,9 +42,6 @@ export interface BackupDependencies {
   /** Override for tests; defaults to the global fetch. */
   fetchImpl?: typeof fetch
 }
-
-const describeDestination = (destination: BackupDestination): string =>
-  destination.type === 'folder' ? `folder:${destination.path}` : `s3:${destination.bucket}`
 
 function snapshotFileName(now: Date, trigger: BackupTrigger): string {
   const stamp = now.toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/:/g, '-')
@@ -100,48 +99,6 @@ export async function writeCompressedSnapshot(db: Database, targetPath: string):
   return (await fsp.stat(targetPath)).size
 }
 
-async function uploadToS3(
-  destination: S3BackupDestination,
-  fileName: string,
-  body: Buffer,
-  now: Date,
-  fetchImpl: typeof fetch,
-): Promise<void> {
-  const key = `${destination.prefix}${fileName}`
-  const url = new URL(
-    `${destination.endpoint.replace(/\/+$/, '')}/${destination.bucket}/${key
-      .split('/')
-      .map(encodeURIComponent)
-      .join('/')}`,
-  )
-  const headers = signRequest({
-    method: 'PUT',
-    url,
-    headers: { 'content-type': 'application/gzip' },
-    payload: body,
-    region: destination.region,
-    accessKeyId: destination.accessKeyId,
-    secretAccessKey: destination.secretAccessKey,
-    now,
-  })
-
-  const response = await fetchImpl(url, {
-    method: 'PUT',
-    headers,
-    body: new Uint8Array(body),
-    signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
-  })
-  if (!response.ok) {
-    const text = (await response.text()).slice(0, 300)
-    throw new Error(`HTTP ${response.status} ${response.statusText}: ${text}`)
-  }
-}
-
-async function copyToFolder(destination: string, localPath: string, fileName: string): Promise<void> {
-  await fsp.mkdir(destination, { recursive: true })
-  await fsp.copyFile(localPath, path.join(destination, fileName))
-}
-
 /** Lists snapshots in the backup folder, oldest first. */
 export async function listLocalSnapshots(
   backupsDir: string,
@@ -153,7 +110,7 @@ export async function listLocalSnapshots(
     return []
   }
   return names
-    .map((fileName) => ({ fileName, match: FILE_NAME_PATTERN.exec(fileName) }))
+    .map((fileName) => ({ fileName, match: BACKUP_FILE_NAME_PATTERN.exec(fileName) }))
     .filter((entry): entry is { fileName: string; match: RegExpExecArray } => entry.match !== null)
     .map(({ fileName, match }) => ({ fileName, stamp: match[1] as string, trigger: match[2] as string }))
     .sort((a, b) => (a.stamp < b.stamp ? -1 : a.stamp > b.stamp ? 1 : 0))
@@ -180,6 +137,11 @@ export async function pruneLocalSnapshots(
 }
 
 let backupInProgress = false
+
+const storesOf = (deps: BackupDependencies): BackupStore[] =>
+  createStores(deps.config, { fetchImpl: deps.fetchImpl ?? fetch, now: deps.now })
+
+const DRIVE_UNPLUGGED_MESSAGE = 'Ổ sao lưu chưa được cắm'
 
 /**
  * Snapshots the database locally, then copies the snapshot to every configured destination.
@@ -220,26 +182,31 @@ export async function runBackup(deps: BackupDependencies, trigger: BackupTrigger
     log.info({ trigger, fileName, sizeBytes }, 'local backup created')
 
     const outcomes: DestinationOutcome[] = [{ destination: 'local', ok: true }]
-    const body = deps.config.destinations.some((d) => d.type === 's3') ? await fsp.readFile(localPath) : null
 
-    for (const destination of deps.config.destinations) {
-      const label = describeDestination(destination)
+    for (const store of storesOf(deps)) {
+      if (!(await store.isAvailable())) {
+        // Not an error worth recording: the copy is queued and goes over once the drive is back.
+        outcomes.push({
+          destination: store.label,
+          kind: store.kind,
+          ok: false,
+          unavailable: true,
+          error: DRIVE_UNPLUGGED_MESSAGE,
+        })
+        continue
+      }
       const runId = randomUUID()
-      recordRun(deps.db, { id: runId, startedAt: deps.now().toISOString(), trigger, destination: label })
+      recordRun(deps.db, { id: runId, startedAt: deps.now().toISOString(), trigger, destination: store.label })
       try {
-        if (destination.type === 'folder') {
-          await copyToFolder(destination.path, localPath, fileName)
-        } else {
-          await uploadToS3(destination, fileName, body as Buffer, deps.now(), deps.fetchImpl ?? fetch)
-        }
+        await store.put(fileName, localPath)
         finishRun(deps.db, runId, deps.now().toISOString(), { ok: true, sizeBytes, fileName })
-        outcomes.push({ destination: label, ok: true })
-        log.info({ destination: label, fileName }, 'backup copied')
+        outcomes.push({ destination: store.label, kind: store.kind, ok: true })
+        log.info({ destination: store.label, fileName }, 'backup copied')
       } catch (error) {
         const message = (error as Error).message
         finishRun(deps.db, runId, deps.now().toISOString(), { ok: false, error: message })
-        outcomes.push({ destination: label, ok: false, error: message })
-        log.error({ destination: label, err: error }, 'backup destination failed')
+        outcomes.push({ destination: store.label, kind: store.kind, ok: false, error: message })
+        log.error({ destination: store.label, err: error }, 'backup destination failed')
       }
     }
 
@@ -248,6 +215,101 @@ export async function runBackup(deps: BackupDependencies, trigger: BackupTrigger
     return { ok: true, fileName, localPath, sizeBytes, destinations: outcomes }
   } finally {
     backupInProgress = false
+  }
+}
+
+// ---------- catching up drives and online storage ----------
+
+const NETWORK_RETRY_MS = 10 * 60_000
+const SYNC_STARTUP_DELAY_MS = 30_000
+
+export interface SyncOutcome {
+  destination: string
+  kind: BackupStore['kind']
+  ok: boolean
+  unavailable?: boolean
+  copied: string[]
+  pruned: string[]
+  error?: string
+}
+
+let syncInProgress = false
+
+/**
+ * Brings every drive and online store in line with the local folder: copies snapshots they do not
+ * have yet (the drive was unplugged, the shop was offline) and drops the oldest beyond the
+ * retention limit. Being unplugged or offline is normal, so it is reported, never thrown.
+ */
+export async function syncDestinations(deps: BackupDependencies): Promise<SyncOutcome[]> {
+  const stores = storesOf(deps)
+  if (stores.length === 0 || syncInProgress) return []
+  syncInProgress = true
+
+  const log = deps.logger.child({ component: 'backup' })
+  const outcomes: SyncOutcome[] = []
+  try {
+    for (const store of stores) {
+      const outcome: SyncOutcome = {
+        destination: store.label,
+        kind: store.kind,
+        ok: true,
+        copied: [],
+        pruned: [],
+      }
+      try {
+        if (!(await store.isAvailable())) {
+          outcome.ok = false
+          outcome.unavailable = true
+          outcomes.push(outcome)
+          continue
+        }
+
+        const present = new Set((await store.list()).map((copy) => copy.fileName))
+        const missing = (await listLocalSnapshots(deps.backupsDir)).filter(
+          (entry) => !present.has(entry.fileName),
+        )
+
+        for (const entry of missing) {
+          const runId = randomUUID()
+          recordRun(deps.db, {
+            id: runId,
+            startedAt: deps.now().toISOString(),
+            trigger: entry.trigger as BackupTrigger,
+            destination: store.label,
+          })
+          try {
+            await store.put(entry.fileName, path.join(deps.backupsDir, entry.fileName))
+            const sizeBytes = (await fsp.stat(path.join(deps.backupsDir, entry.fileName))).size
+            finishRun(deps.db, runId, deps.now().toISOString(), { ok: true, sizeBytes, fileName: entry.fileName })
+            present.add(entry.fileName)
+            outcome.copied.push(entry.fileName)
+          } catch (error) {
+            finishRun(deps.db, runId, deps.now().toISOString(), { ok: false, error: (error as Error).message })
+            throw error
+          }
+        }
+
+        const doomed = [...present].sort().slice(0, Math.max(0, present.size - deps.config.destinationRetention))
+        for (const fileName of doomed) {
+          await store.remove(fileName)
+          outcome.pruned.push(fileName)
+        }
+        if (outcome.copied.length > 0 || outcome.pruned.length > 0) {
+          log.info(
+            { destination: store.label, copied: outcome.copied.length, pruned: outcome.pruned.length },
+            'backup copies synced',
+          )
+        }
+      } catch (error) {
+        outcome.ok = false
+        outcome.error = (error as Error).message
+        log.warn({ destination: store.label, err: error }, 'backup sync failed, will retry')
+      }
+      outcomes.push(outcome)
+    }
+    return outcomes
+  } finally {
+    syncInProgress = false
   }
 }
 
@@ -292,37 +354,81 @@ export function lastSuccessfulLocalBackup(db: Database): Date | null {
   return row ? new Date(row.finished_at) : null
 }
 
+/** Newest successful copy to destinations whose label starts with `prefix` ('folder:' or 's3:'). */
+export function lastSuccessfulCopy(db: Database, prefix: 'folder:' | 's3:'): Date | null {
+  const row = db
+    .prepare(
+      `SELECT finished_at FROM backup_runs
+        WHERE destination LIKE ? AND status = 'ok' ORDER BY finished_at DESC LIMIT 1`,
+    )
+    .get(`${prefix}%`) as { finished_at: string } | undefined
+  return row ? new Date(row.finished_at) : null
+}
+
 export interface BackupScheduler {
   /** Call after any successful write so the next check knows a new backup is worthwhile. */
   markDirty(): void
+  /** Tell the scheduler how a backup went, so copies that did not arrive get retried. */
+  noteBackupResult(result: BackupResult): void
+  /** Ask for a catch-up soon, e.g. right after a drive was chosen in Settings. */
+  requestSync(): void
   stop(): void
 }
 
 export function startBackupScheduler(
   deps: BackupDependencies,
-  options: { checkIntervalMs?: number } = {},
+  options: { checkIntervalMs?: number; networkRetryMs?: number } = {},
 ): BackupScheduler {
   const startedAt = deps.now().getTime()
+  const networkRetryMs = options.networkRetryMs ?? NETWORK_RETRY_MS
   let dirty = false
   let ranBefore = false
   let running = false
+  // Starting up counts as "maybe behind": copies from an unplugged or offline stretch may be waiting.
+  let syncDue = true
+  let lastSyncAttemptAt = 0
+  // A drive is checked on every tick (it is only a file-system check); the network waits longer.
+  let retryDelayMs = 0
+
+  const waitFor = (outcomes: { kind?: BackupStore['kind']; ok: boolean }[]): number =>
+    outcomes.some((outcome) => !outcome.ok && outcome.kind === 's3') ? networkRetryMs : 0
+
+  const noteBackupResult = (result: BackupResult): void => {
+    if (!result.ok) return
+    syncDue = true
+    const anyMissing = result.destinations.some((destination) => !destination.ok && destination.kind)
+    // After a success sync soon (to prune old copies); after a failure wait out the retry delay.
+    lastSyncAttemptAt = anyMissing ? deps.now().getTime() : 0
+    retryDelayMs = waitFor(result.destinations)
+  }
 
   const tick = async (): Promise<void> => {
     if (running) return
-    const decision = decideBackup({
-      now: deps.now(),
-      lastOkAt: lastSuccessfulLocalBackup(deps.db),
-      dirty,
-      uptimeMs: deps.now().getTime() - startedAt,
-    })
-    if (!decision.run) return
-
     running = true
     try {
-      deps.logger.info({ component: 'backup', reason: decision.reason }, 'starting scheduled backup')
-      const result = await runBackup(deps, ranBefore ? 'periodic' : 'startup')
-      ranBefore = true
-      if (result.ok) dirty = false
+      const now = deps.now()
+      const decision = decideBackup({
+        now,
+        lastOkAt: lastSuccessfulLocalBackup(deps.db),
+        dirty,
+        uptimeMs: now.getTime() - startedAt,
+      })
+      if (decision.run) {
+        deps.logger.info({ component: 'backup', reason: decision.reason }, 'starting scheduled backup')
+        const result = await runBackup(deps, ranBefore ? 'periodic' : 'startup')
+        ranBefore = true
+        if (result.ok) dirty = false
+        noteBackupResult(result)
+      }
+
+      const current = deps.now().getTime()
+      const waitedLongEnough = current - lastSyncAttemptAt >= retryDelayMs
+      if (syncDue && waitedLongEnough && current - startedAt >= SYNC_STARTUP_DELAY_MS) {
+        lastSyncAttemptAt = current
+        const outcomes = await syncDestinations(deps)
+        syncDue = outcomes.some((outcome) => !outcome.ok)
+        retryDelayMs = waitFor(outcomes)
+      }
     } catch (error) {
       deps.logger.error({ component: 'backup', err: error }, 'scheduled backup crashed')
     } finally {
@@ -337,6 +443,12 @@ export function startBackupScheduler(
     markDirty: () => {
       dirty = true
     },
+    noteBackupResult,
+    requestSync: () => {
+      syncDue = true
+      lastSyncAttemptAt = 0
+      retryDelayMs = 0
+    },
     stop: () => clearInterval(timer),
   }
 }
@@ -344,6 +456,8 @@ export function startBackupScheduler(
 // ---------- health ----------
 
 const WARNING_AFTER_MS = 48 * HOUR_MS
+// A drive used now and then is only worth a reminder when it has really been neglected.
+const OCCASIONAL_DRIVE_WARNING_AFTER_MS = 14 * 24 * HOUR_MS
 
 export interface BackupHealth {
   lastBackup: { at: string; status: 'ok' } | null
@@ -351,14 +465,21 @@ export interface BackupHealth {
 }
 
 /** What /api/health reports about backups: the newest good backup and anything that needs attention. */
-export function backupHealth(db: Database, now: Date, hasCloudDestination: boolean): BackupHealth {
+export function backupHealth(
+  db: Database,
+  now: Date,
+  hasCloudDestination: boolean,
+  drives: readonly FolderBackupDestination[] = [],
+): BackupHealth {
   const lastLocal = lastSuccessfulLocalBackup(db)
   const installedRow = db.prepare('SELECT MIN(created_at) AS at FROM users').get() as { at: string | null }
   const installedAt = installedRow.at ? new Date(installedRow.at) : null
   const warnings: string[] = []
+  const installedFor = (ms: number): boolean =>
+    installedAt !== null && now.getTime() - installedAt.getTime() > ms
 
   // A fresh install has had no chance to back up yet, so only warn once it is old enough.
-  const oldEnough = installedAt !== null && now.getTime() - installedAt.getTime() > WARNING_AFTER_MS
+  const oldEnough = installedFor(WARNING_AFTER_MS)
 
   if (lastLocal) {
     if (now.getTime() - lastLocal.getTime() > WARNING_AFTER_MS) {
@@ -369,14 +490,24 @@ export function backupHealth(db: Database, now: Date, hasCloudDestination: boole
   }
 
   if (hasCloudDestination && oldEnough) {
-    const lastCloud = db
-      .prepare(
-        `SELECT finished_at FROM backup_runs
-          WHERE destination LIKE 's3:%' AND status = 'ok' ORDER BY finished_at DESC LIMIT 1`,
-      )
-      .get() as { finished_at: string } | undefined
-    if (!lastCloud || now.getTime() - Date.parse(lastCloud.finished_at) > WARNING_AFTER_MS) {
+    const lastCloud = lastSuccessfulCopy(db, 's3:')
+    if (!lastCloud || now.getTime() - lastCloud.getTime() > WARNING_AFTER_MS) {
       warnings.push('Đã hơn 48 giờ chưa sao lưu lên cloud')
+    }
+  }
+
+  if (drives.length > 0) {
+    const occasional = drives.every((drive) => drive.mode === 'occasional')
+    const limit = occasional ? OCCASIONAL_DRIVE_WARNING_AFTER_MS : WARNING_AFTER_MS
+    if (installedFor(limit)) {
+      const lastDrive = lastSuccessfulCopy(db, 'folder:')
+      if (!lastDrive || now.getTime() - lastDrive.getTime() > limit) {
+        warnings.push(
+          occasional
+            ? 'Đã hơn 14 ngày chưa sao lưu ra ổ cứng ngoài. Hãy cắm ổ vào máy.'
+            : 'Đã hơn 48 giờ chưa sao lưu ra ổ cứng ngoài. Hãy kiểm tra ổ đã được cắm chưa.',
+        )
+      }
     }
   }
 

@@ -29,7 +29,7 @@ describe('backup', () => {
   const deps = (overrides: Partial<BackupDependencies> = {}): BackupDependencies => ({
     db,
     backupsDir: path.join(dir, 'backups'),
-    config: { localRetention: 7, destinations: [] },
+    config: { localRetention: 7, destinationRetention: 30, destinations: [] },
     logger,
     now: () => clock,
     ...overrides,
@@ -82,7 +82,7 @@ describe('backup', () => {
       const usb = path.join(dir, 'usb')
 
       const result = await runBackup(
-        deps({ config: { localRetention: 7, destinations: [{ type: 'folder', path: usb }] } }),
+        deps({ config: { localRetention: 7, destinationRetention: 30, destinations: [{ type: 'folder', path: usb, mode: 'always' }] } }),
         'manual',
       )
 
@@ -106,6 +106,7 @@ describe('backup', () => {
           fetchImpl,
           config: {
             localRetention: 7,
+            destinationRetention: 30,
             destinations: [
               {
                 type: 's3',
@@ -124,7 +125,7 @@ describe('backup', () => {
 
       expect(result.destinations).toEqual([
         { destination: 'local', ok: true },
-        { destination: 's3:shop-khoilam', ok: true },
+        { destination: 's3:shop-khoilam', kind: 's3', ok: true },
       ])
       expect(calls).toHaveLength(1)
       expect(calls[0]?.url).toBe(
@@ -148,6 +149,7 @@ describe('backup', () => {
           fetchImpl,
           config: {
             localRetention: 7,
+            destinationRetention: 30,
             destinations: [
               {
                 type: 's3',
@@ -186,6 +188,7 @@ describe('backup', () => {
           fetchImpl,
           config: {
             localRetention: 7,
+            destinationRetention: 30,
             destinations: [
               {
                 type: 's3',

@@ -18,9 +18,13 @@ export class ConfigError extends Error {
   }
 }
 
+/** How the shop uses an external drive: left plugged in, or plugged in now and then. */
+export type DriveMode = 'always' | 'occasional'
+
 export interface FolderBackupDestination {
   type: 'folder'
   path: string
+  mode: DriveMode
 }
 
 export interface S3BackupDestination {
@@ -40,6 +44,8 @@ export type BackupDestination = FolderBackupDestination | S3BackupDestination
 export interface BackupConfig {
   /** Regular local snapshots to keep. Snapshots taken before updates/restores are kept separately. */
   localRetention: number
+  /** Copies kept at each drive or online destination; the app removes older ones itself. */
+  destinationRetention: number
   destinations: BackupDestination[]
 }
 
@@ -79,7 +85,11 @@ export interface LoadConfigInput {
 
 // Unknown keys are kept on purpose: later phases add backup/update settings to the same file.
 const backupDestinationSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('folder'), path: z.string().min(1) }),
+  z.object({
+    type: z.literal('folder'),
+    path: z.string().min(1),
+    mode: z.enum(['always', 'occasional']).default('always'),
+  }),
   z.object({
     type: z.literal('s3'),
     endpoint: z.url(),
@@ -99,6 +109,7 @@ const configFileSchema = z
     backup: z
       .object({
         localRetention: z.number().int().min(1).max(60).default(7),
+        destinationRetention: z.number().int().min(3).max(365).default(30),
         destinations: z.array(backupDestinationSchema).default([]),
       })
       .optional(),
@@ -221,7 +232,7 @@ export function loadConfig(input: LoadConfigInput): AppConfig {
     backupsDir: path.join(dataDir, 'backups'),
     configFilePath,
     logLevel,
-    backup: file.backup ?? { localRetention: 7, destinations: [] },
+    backup: file.backup ?? { localRetention: 7, destinationRetention: 30, destinations: [] },
     webRoot: webRoot ? path.resolve(webRoot) : null,
   }
 }

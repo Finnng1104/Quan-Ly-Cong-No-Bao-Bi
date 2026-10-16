@@ -34,7 +34,7 @@ describe('restore', () => {
   const takeBackup = async (now: () => Date = clock): Promise<string> => {
     const db = openDatabase(dbPath)
     const result = await runBackup(
-      { db, backupsDir, config: { localRetention: 7, destinations: [] }, logger, now },
+      { db, backupsDir, config: { localRetention: 7, destinationRetention: 30, destinations: [] }, logger, now },
       'manual',
     )
     db.close()

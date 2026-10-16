@@ -41,6 +41,8 @@ Cách dùng: qlcn <lệnh>
   update              Tải và cài bản mới nhất (tự sao lưu, tự quay lại bản cũ nếu bản mới lỗi)
   backup              Sao lưu ngay (dịch vụ vẫn chạy bình thường)
   backups             Liệt kê các bản sao lưu trên máy
+  backup-setup        Kết nối sao lưu online (Cloudflare R2): hỏi khóa, thử kết nối, lưu, khởi động
+                      lại dịch vụ và sao lưu thử một bản
   restore <file|ngày> Thay dữ liệu bằng một bản sao lưu (ngày dạng YYYY-MM-DD = bản mới nhất ngày đó).
                       Tự tắt dịch vụ, chụp lại dữ liệu hiện tại, khôi phục rồi bật lại.
                       Thêm --yes để bỏ qua câu hỏi xác nhận.
@@ -118,6 +120,15 @@ cmd_backups() {
   done
 }
 
+cmd_backup_setup() {
+  run_main backup-setup || return $?
+  echo "Đang khởi động lại dịch vụ để áp dụng..."
+  service_stop
+  service_start || return 1
+  echo "Đang sao lưu thử một bản lên online..."
+  run_main backup
+}
+
 cmd_restore() {
   local source="" assume_yes=no
   for arg in "$@"; do
@@ -184,6 +195,7 @@ case "$command" in
   update) cmd_update ;;
   backup) run_main backup ;;
   backups) cmd_backups ;;
+  backup-setup) cmd_backup_setup ;;
   restore) cmd_restore "$@" ;;
   doctor) cmd_doctor ;;
   logs) open "$DATA_DIR/logs" ;;

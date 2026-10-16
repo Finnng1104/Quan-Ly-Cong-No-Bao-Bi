@@ -6,6 +6,7 @@ export type ErrorCode =
   | 'CONFLICT'
   | 'RATE_LIMITED'
   | 'INTERNAL'
+  | 'UNAVAILABLE'
 
 const STATUS_BY_CODE: Record<ErrorCode, number> = {
   VALIDATION_ERROR: 400,
@@ -15,6 +16,7 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   CONFLICT: 409,
   RATE_LIMITED: 429,
   INTERNAL: 500,
+  UNAVAILABLE: 503,
 }
 
 export interface ErrorBody {
@@ -53,6 +55,8 @@ export function codeForStatus(statusCode: number): ErrorCode {
       return 'CONFLICT'
     case 429:
       return 'RATE_LIMITED'
+    case 503:
+      return 'UNAVAILABLE'
     default:
       return 'VALIDATION_ERROR'
   }

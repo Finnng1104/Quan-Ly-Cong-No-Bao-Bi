@@ -5,7 +5,7 @@ import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { createGunzip } from 'node:zlib'
 import type { Logger } from 'pino'
-import { openDatabase } from '../../db/client.js'
+import { openDatabase, type Database } from '../../db/client.js'
 import { getSchemaVersion } from '../../db/migrate.js'
 import { todayInShopZone } from '../../shared/dates.js'
 import { listLocalSnapshots, writeCompressedSnapshot } from './service.js'
@@ -69,6 +69,60 @@ async function resolveSource(input: RestoreInput): Promise<string> {
   return resolved
 }
 
+/** Unpacks `source` into `candidate` and proves it is a healthy database this build can open. */
+async function unpackAndVerify(
+  source: string,
+  candidate: string,
+  supportedSchemaVersion: number,
+): Promise<void> {
+  if (source.endsWith('.gz')) {
+    await pipeline(fs.createReadStream(source), createGunzip(), fs.createWriteStream(candidate))
+  } else {
+    await fsp.copyFile(source, candidate)
+  }
+
+  let schemaVersion: number
+  try {
+    const probe = openDatabase(candidate)
+    try {
+      const rows = probe.pragma('integrity_check') as { integrity_check: string }[]
+      if (rows.length !== 1 || rows[0]?.integrity_check !== 'ok') {
+        throw new RestoreError('CORRUPT', 'The backup failed its integrity check')
+      }
+      schemaVersion = getSchemaVersion(probe)
+    } finally {
+      probe.close()
+    }
+  } catch (error) {
+    if (error instanceof RestoreError) throw error
+    throw new RestoreError('NOT_A_DATABASE', `The file is not a valid database: ${(error as Error).message}`)
+  }
+
+  if (schemaVersion > supportedSchemaVersion) {
+    throw new RestoreError(
+      'NEWER_THAN_CODE',
+      `The backup is from a newer version (schema ${schemaVersion}, this build supports ${supportedSchemaVersion})`,
+    )
+  }
+}
+
+/**
+ * Puts a verified candidate in place of the database file.
+ * The old WAL/SHM files belong to the old database and must not be replayed onto the new one, and
+ * rename() swaps the file in one step, so a power cut leaves either the old or the new database,
+ * never none (which would make the next start create an empty one).
+ */
+export async function replaceDatabaseFile(dbPath: string, candidate: string): Promise<void> {
+  await fsp.rm(`${dbPath}-wal`, { force: true })
+  await fsp.rm(`${dbPath}-shm`, { force: true })
+  await fsp.rename(candidate, dbPath)
+}
+
+function safetySnapshotPath(backupsDir: string, now: Date): string {
+  const stamp = now.toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/:/g, '-')
+  return path.join(backupsDir, `qlcn-${stamp}-pre-restore.db.gz`)
+}
+
 /**
  * Replaces the live database with a backup. The backup is fully verified before anything is
  * touched, and the current database is snapshotted first, so a bad restore cannot lose data.
@@ -85,41 +139,11 @@ export async function restoreFromBackup(input: RestoreInput): Promise<RestoreRes
   const candidate = `${input.dbPath}.restore-${randomUUID()}`
 
   try {
-    if (source.endsWith('.gz')) {
-      await pipeline(fs.createReadStream(source), createGunzip(), fs.createWriteStream(candidate))
-    } else {
-      await fsp.copyFile(source, candidate)
-    }
-
-    // Verify the candidate on its own before it can replace anything.
-    let schemaVersion: number
-    try {
-      const probe = openDatabase(candidate)
-      try {
-        const rows = probe.pragma('integrity_check') as { integrity_check: string }[]
-        if (rows.length !== 1 || rows[0]?.integrity_check !== 'ok') {
-          throw new RestoreError('CORRUPT', 'The backup failed its integrity check')
-        }
-        schemaVersion = getSchemaVersion(probe)
-      } finally {
-        probe.close()
-      }
-    } catch (error) {
-      if (error instanceof RestoreError) throw error
-      throw new RestoreError('NOT_A_DATABASE', `The file is not a valid database: ${(error as Error).message}`)
-    }
-
-    if (schemaVersion > input.supportedSchemaVersion) {
-      throw new RestoreError(
-        'NEWER_THAN_CODE',
-        `The backup is from a newer version (schema ${schemaVersion}, this build supports ${input.supportedSchemaVersion})`,
-      )
-    }
+    await unpackAndVerify(source, candidate, input.supportedSchemaVersion)
 
     let safetySnapshot: string | null = null
     if (fs.existsSync(input.dbPath)) {
-      const stamp = input.now().toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/:/g, '-')
-      safetySnapshot = path.join(input.backupsDir, `qlcn-${stamp}-pre-restore.db.gz`)
+      safetySnapshot = safetySnapshotPath(input.backupsDir, input.now())
       const current = openDatabase(input.dbPath)
       try {
         await writeCompressedSnapshot(current, safetySnapshot)
@@ -129,17 +153,48 @@ export async function restoreFromBackup(input: RestoreInput): Promise<RestoreRes
       log.info({ safetySnapshot }, 'current database saved before restore')
     }
 
-    // The old WAL/SHM files belong to the old database and must not be replayed onto the new one.
-    // (Closing the snapshot connection above already checkpointed the WAL into the database file.)
-    await fsp.rm(`${input.dbPath}-wal`, { force: true })
-    await fsp.rm(`${input.dbPath}-shm`, { force: true })
-    // rename() replaces the file in one step, so a power cut leaves either the old or the new
-    // database — never no database, which would make the next start create an empty one.
-    await fsp.rename(candidate, input.dbPath)
+    await replaceDatabaseFile(input.dbPath, candidate)
 
     log.info({ source }, 'database restored')
     return { restoredFrom: source, safetySnapshot }
   } finally {
     await fsp.rm(candidate, { force: true })
+  }
+}
+
+export interface StageRestoreInput {
+  /** The database the running server is using. */
+  db: Database
+  dbPath: string
+  backupsDir: string
+  /** A backup file already on this machine (a cloud copy must be downloaded first). */
+  sourcePath: string
+  supportedSchemaVersion: number
+  logger: Logger
+  now(): Date
+}
+
+export interface StagedRestore {
+  /** Verified database file waiting next to the live one; swap it in with `replaceDatabaseFile`. */
+  candidatePath: string
+  safetySnapshot: string
+}
+
+/**
+ * First half of a restore done while the server is running: verify the backup and save the current
+ * data. The swap itself happens after the server has closed its database (see main.ts), so no
+ * request can write into a database that is about to be replaced.
+ */
+export async function stageRestore(input: StageRestoreInput): Promise<StagedRestore> {
+  const candidatePath = `${input.dbPath}.restore-${randomUUID()}`
+  try {
+    await unpackAndVerify(input.sourcePath, candidatePath, input.supportedSchemaVersion)
+    const safetySnapshot = safetySnapshotPath(input.backupsDir, input.now())
+    await writeCompressedSnapshot(input.db, safetySnapshot)
+    input.logger.child({ component: 'restore' }).info({ safetySnapshot }, 'restore staged')
+    return { candidatePath, safetySnapshot }
+  } catch (error) {
+    await fsp.rm(candidatePath, { force: true })
+    throw error
   }
 }

@@ -20,6 +20,9 @@ export type Action =
   | 'adjustments:write'
   | 'reports:read'
   | 'statements:write'
+  | 'backup:read'
+  | 'backup:write'
+  | 'backup:restore'
 
 export interface AuthenticatedUser {
   id: string

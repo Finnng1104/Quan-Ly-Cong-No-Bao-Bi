@@ -8,6 +8,8 @@ export const EXIT_CODE = {
   DB_CORRUPT: 5,
   MIGRATION_FAILED: 6,
   SUPERVISOR_GAVE_UP: 7,
+  // Not a failure: the server stopped on purpose (e.g. after restoring a backup) and wants a fresh start.
+  RESTART_REQUESTED: 8,
 } as const
 
 // Restarting cannot fix these: the same input would fail the same way, so the

@@ -3,6 +3,7 @@ import { parseArgs } from 'node:util'
 import type { Logger } from 'pino'
 import { buildApp } from './app.js'
 import { ask, readLineFromStdin } from './cli/prompt.js'
+import { BackupSetupError, buildS3Destination, saveDestination } from './cli/backup-setup.js'
 import { initAdmin } from './cli/init-admin.js'
 import { ConfigError, loadConfig, type AppConfig, type ConfigFlags } from './config/index.js'
 import {
@@ -12,7 +13,8 @@ import {
   type Database,
 } from './db/client.js'
 import { loadMigrationFiles, MigrationError, runMigrations } from './db/migrate.js'
-import { restoreFromBackup, RestoreError } from './modules/backup/restore.js'
+import { replaceDatabaseFile, restoreFromBackup, RestoreError } from './modules/backup/restore.js'
+import { probeCloudDestination } from './modules/backup/cloud.js'
 import { runBackup, startBackupScheduler } from './modules/backup/service.js'
 import { buildDiagnostics, writeDiagnosticsFile } from './modules/system/diagnostics.js'
 import { MIN_PASSWORD_LENGTH } from './shared/password.js'
@@ -33,6 +35,7 @@ Commands:
   init-admin            Create the first account (--username, --password-stdin)
   backup                Take a backup now and copy it to the configured destinations
                         (--trigger pre-update is used by the updater to label its safety copy)
+  backup-setup          Connect online backup (Cloudflare R2): asks for the keys, tests them, saves them
   restore <file|date>   Replace the database with a backup (the server must be stopped)
   doctor                Write a diagnostics file to send to support (contains no shop data)
   version               Print the version and exit
@@ -147,27 +150,46 @@ async function runServe(flags: ConfigFlags): Promise<void> {
     process.exit(exitCodeFor(error))
   }
 
-  const scheduler = startBackupScheduler({
+  const backupDependencies = {
     db,
     backupsDir: config.backupsDir,
     config: config.backup,
     logger: rootLogger,
     now: () => new Date(),
-  })
+  }
+  const scheduler = startBackupScheduler(backupDependencies)
 
   const app = await buildApp({
     port: config.port,
     db,
     logger: rootLogger,
     version: APP_VERSION,
-    hasCloudBackup: config.backup.destinations.some((destination) => destination.type === 's3'),
+    backupDestinations: () => config.backup.destinations,
     onDataChanged: () => scheduler.markDirty(),
+    backup: {
+      deps: backupDependencies,
+      dbPath: config.dbPath,
+      supportedSchemaVersion: loadMigrationFiles(MIGRATIONS_DIR).length,
+      scheduler,
+      configFilePath: config.configFilePath,
+      volumesDir: process.platform === 'darwin' ? '/Volumes' : null,
+      // Swap the file only after the database is closed, then exit so the supervisor starts a
+      // fresh process that opens the restored data (and runs any newer migrations on it).
+      requestRestore: (staged) =>
+        void shutdown('restore from backup', EXIT_CODE.RESTART_REQUESTED, () =>
+          replaceDatabaseFile(config.dbPath, staged.candidatePath),
+        ),
+    },
     ...(config.webRoot ? { webRoot: config.webRoot } : {}),
     publicOrigins: config.publicOrigins,
   })
 
   let shuttingDown = false
-  const shutdown = async (reason: string): Promise<void> => {
+  const shutdown = async (
+    reason: string,
+    exitCode: number = EXIT_CODE.OK,
+    afterDatabaseClosed?: () => Promise<void>,
+  ): Promise<void> => {
     if (shuttingDown) return
     shuttingDown = true
     logger.info({ reason }, 'shutting down')
@@ -180,11 +202,12 @@ async function runServe(flags: ConfigFlags): Promise<void> {
       scheduler.stop()
       await app.close()
       db.close()
+      await afterDatabaseClosed?.()
     } catch (error) {
       logger.error({ err: error }, 'error while shutting down')
       process.exit(EXIT_CODE.GENERIC_ERROR)
     }
-    process.exit(EXIT_CODE.OK)
+    process.exit(exitCode)
   }
 
   process.on('SIGINT', () => void shutdown('SIGINT'))
@@ -269,6 +292,55 @@ async function runBackupCommand(cli: CommandLine): Promise<void> {
     process.exitCode = everythingOk ? EXIT_CODE.OK : EXIT_CODE.GENERIC_ERROR
   } finally {
     db.close()
+  }
+}
+
+/** Value from the environment (for scripted installs), else asked on the terminal. */
+async function valueFromEnvironmentOrPrompt(name: string, question: string, hidden = false): Promise<string> {
+  return process.env[name] ?? (await ask(question, hidden))
+}
+
+async function runBackupSetup(flags: ConfigFlags): Promise<void> {
+  const config = loadConfig({ flags, env: process.env })
+  if (!process.stdin.isTTY && process.env['QLCN_R2_SECRET_ACCESS_KEY'] === undefined) {
+    console.error('Chạy lệnh này trong Terminal, hoặc truyền các biến QLCN_R2_* (xem RUNBOOK).')
+    process.exit(EXIT_CODE.GENERIC_ERROR)
+  }
+
+  try {
+    const destination = buildS3Destination({
+      accountOrEndpoint: await valueFromEnvironmentOrPrompt(
+        'QLCN_R2_ACCOUNT_ID',
+        'Cloudflare Account ID (32 ký tự) hoặc địa chỉ endpoint: ',
+      ),
+      bucket: await valueFromEnvironmentOrPrompt('QLCN_R2_BUCKET', 'Tên bucket: '),
+      accessKeyId: await valueFromEnvironmentOrPrompt('QLCN_R2_ACCESS_KEY_ID', 'Access Key ID: '),
+      secretAccessKey: await valueFromEnvironmentOrPrompt(
+        'QLCN_R2_SECRET_ACCESS_KEY',
+        'Secret Access Key (không hiện khi gõ): ',
+        true,
+      ),
+      prefix: process.env['QLCN_R2_PREFIX'] ?? '',
+    })
+
+    console.log('Đang thử kết nối...')
+    try {
+      await probeCloudDestination({ destination, fetchImpl: fetch, now: new Date() })
+    } catch (error) {
+      throw new BackupSetupError(
+        `Không dùng được thông tin này: ${(error as Error).message}\n` +
+          'Kiểm tra: token có quyền Object Read & Write trên đúng bucket, và Account ID/tên bucket gõ đúng.',
+      )
+    }
+
+    saveDestination(config.configFilePath, destination)
+    console.log(`Đã kết nối bucket "${destination.bucket}" và lưu vào ${config.configFilePath}`)
+  } catch (error) {
+    if (error instanceof BackupSetupError) {
+      console.error(error.message)
+      process.exit(EXIT_CODE.GENERIC_ERROR)
+    }
+    throw error
   }
 }
 
@@ -369,6 +441,8 @@ async function main(): Promise<void> {
       return runInitAdmin(cli)
     case 'backup':
       return runBackupCommand(cli)
+    case 'backup-setup':
+      return runBackupSetup(cli.flags)
     case 'restore':
       return runRestore(cli)
     case 'doctor':
