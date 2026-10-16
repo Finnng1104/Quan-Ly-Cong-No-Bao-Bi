@@ -136,7 +136,7 @@ export const api = {
     list: () => request('GET', '/backups'),
     /** { fileName, sizeBytes, uploaded, copiedToDrive }: each true | false | null (null = not set up). */
     create: () => request('POST', '/backups'),
-    /** Mounted external drives that can be chosen: [{ name }]. */
+    /** Drives that can be chosen right now: [{ name, freeBytes }]. */
     drives: async () => (await request('GET', '/backups/drives')).drives,
     /** Chooses (or re-configures) the external drive. `volume` may be omitted to only change `mode`. */
     setDrive: ({ volume, mode }) => request('PUT', '/backups/drive', { body: { volume, mode } }),

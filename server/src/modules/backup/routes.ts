@@ -18,6 +18,7 @@ import {
   type BackupScheduler,
 } from './service.js'
 import { createStores, type BackupStore } from './stores.js'
+import { diskutilInspector, type VolumeInspector } from './volumes.js'
 
 /** Shared with the request gate in app.ts: while true, the API refuses everything but /api/health. */
 export interface MaintenanceState {
@@ -35,6 +36,8 @@ export interface BackupRoutesOptions {
   maintenance: MaintenanceState
   /** Folder that lists mounted external drives. Null where the app does not offer drive backup. */
   volumesDir?: string | null
+  /** Decides which mounted volumes may be chosen; defaults to asking macOS. Replaced in tests. */
+  inspectVolume?: VolumeInspector
   /**
    * Called once a restore is verified and the current data is saved. The owner of the database
    * must close it, swap the staged file in and exit so the supervisor starts a fresh process.
@@ -76,14 +79,15 @@ export function registerBackupRoutes(app: FastifyInstance, options: BackupRoutes
   const { deps } = options
   const log = deps.logger.child({ component: 'backup' })
   const volumesDir = options.volumesDir === undefined ? '/Volumes' : options.volumesDir
+  const inspectVolume = options.inspectVolume ?? diskutilInspector
 
   const storeContext = () => ({ fetchImpl: deps.fetchImpl ?? fetch, now: deps.now })
   const currentStores = (): BackupStore[] => createStores(deps.config, storeContext())
   const currentDrive = (): FolderBackupDestination | null => deps.config.destinations.find(isDrive) ?? null
   const hasCloud = (): boolean => deps.config.destinations.some((destination) => destination.type === 's3')
 
-  /** Volumes that can be picked: real mounted drives, not the startup disk (a link to "/"). */
-  async function listVolumes(): Promise<{ name: string; path: string }[]> {
+  /** Drives that can be picked: real, writable, external ones (not the startup disk or an opened .dmg). */
+  async function listVolumes(): Promise<{ name: string; path: string; freeBytes: number | null }[]> {
     if (!volumesDir) return []
     let entries
     try {
@@ -91,9 +95,18 @@ export function registerBackupRoutes(app: FastifyInstance, options: BackupRoutes
     } catch {
       return []
     }
-    return entries
-      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
-      .map((entry) => ({ name: entry.name, path: path.join(volumesDir, entry.name) }))
+    const drives: { name: string; path: string; freeBytes: number | null }[] = []
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith('.')) continue
+      const volumePath = path.join(volumesDir, entry.name)
+      try {
+        const facts = await inspectVolume(volumePath)
+        if (facts.eligible) drives.push({ name: entry.name, path: volumePath, freeBytes: facts.freeBytes })
+      } catch (error) {
+        log.info({ err: error, volumePath }, 'cannot inspect volume, hiding it')
+      }
+    }
+    return drives
   }
 
   const driveStatus = async () => {

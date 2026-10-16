@@ -60,6 +60,11 @@ describe('backup routes', () => {
         dbPath: path.join(dir, 'data', 'app.db'),
         configFilePath,
         volumesDir,
+        // Stands in for `diskutil`: volumes named like installers are not drives.
+        inspectVolume: async (volumePath: string) => ({
+          eligible: !path.basename(volumePath).startsWith('Installer'),
+          freeBytes: 1_000_000_000,
+        }),
         supportedSchemaVersion: 1,
         scheduler: { noteBackupResult: () => undefined, requestSync: () => undefined },
         requestRestore: (staged) => restoreRequests.push(staged),
@@ -252,8 +257,19 @@ describe('backup routes', () => {
       const response = await t.api.get('/api/backups/drives')
 
       expect(response.body.drives).toEqual([
-        { name: 'Backup Drive', path: path.join(volumesDir, 'Backup Drive') },
+        { name: 'Backup Drive', path: path.join(volumesDir, 'Backup Drive'), freeBytes: 1_000_000_000 },
       ])
+    })
+
+    it('hides installer images and refuses to choose one', async () => {
+      fs.mkdirSync(path.join(volumesDir, 'Installer Zalo'))
+      await start({ withCloud: false })
+
+      const listed = await t.api.get('/api/backups/drives')
+      const chosen = await t.api.put('/api/backups/drive', { volume: 'Installer Zalo', mode: 'always' })
+
+      expect(listed.body.drives.map((drive: { name: string }) => drive.name)).toEqual(['Backup Drive'])
+      expect(chosen.status).toBe(404)
     })
 
     it('chooses a drive, saves it and copies backups to it', async () => {

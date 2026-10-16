@@ -24,7 +24,8 @@ const RESTART_GIVE_UP_MS = 90_000
 function formatSize(bytes) {
   if (bytes == null) return ''
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(0)} GB`
 }
 
 /** Full-screen notice shown while the app restarts onto the restored data, then reloads the page. */
@@ -129,6 +130,9 @@ function DrivePicker({ open, onClose, current, onSaved }) {
                   >
                     <Usb size={18} className="text-slate-500" />
                     <span className="text-[14px] font-semibold text-slate-700">{drive.name}</span>
+                    {drive.freeBytes != null && (
+                      <span className="ml-auto text-[12px] text-slate-400">trống {formatSize(drive.freeBytes)}</span>
+                    )}
                   </button>
                 </li>
               ))}
