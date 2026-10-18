@@ -318,7 +318,7 @@ describe('orders', () => {
       const detail = (await t.api.get(`/api/orders/${order.id}`)).body
       expect(detail.editHistory).toHaveLength(1)
       expect(detail.editHistory[0]).toMatchObject({ oldTotal: 12500, newTotal: 17500, diff: 5000 })
-      expect(detail.editHistory[0].changes).toEqual(['Dòng Bao kiếng / Cây: SL 20,000 → 30,000'])
+      expect(detail.editHistory[0].changes).toEqual(['Dòng Bao kiếng / Cây: SL 20 → 30'])
     })
 
     it('describes date, VAT, fee, note and line additions and removals', async () => {
@@ -340,8 +340,8 @@ describe('orders', () => {
         'Thêm tiền VAT 8%: +800',
         'Đổi ghi chú đơn',
         'Thêm phí "Tiền ship": +25.000',
-        'Thêm dòng trả Giấy A6 / Cây: 3,000 x 600',
-        'Xóa dòng Giấy A6/Cây: 5,000 x 500',
+        'Thêm dòng trả Giấy A6 / Cây: 3 x 600',
+        'Xóa dòng Giấy A6/Cây: 5 x 500',
       ])
     })
 

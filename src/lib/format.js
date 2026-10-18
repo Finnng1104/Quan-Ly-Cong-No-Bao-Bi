@@ -7,9 +7,9 @@ export function fmtMoney(n) {
   return moneyFmt.format(Math.round(Number(n)))
 }
 
-// Always 3 decimals ("5,100"): the customer reads quantities this way, and the server stores 3 decimals.
+// Up to the 3 decimals the server stores, without trailing zeros ("5,1", "5,125", "5").
 // Must match formatQty in server/src/shared/format.ts so edit-history text reads the same.
-const qtyFmt = new Intl.NumberFormat('vi-VN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })
+const qtyFmt = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 3 })
 
 export function fmtQty(n) {
   if (n === null || n === undefined) return ''

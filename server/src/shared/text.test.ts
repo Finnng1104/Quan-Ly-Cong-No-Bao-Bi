@@ -33,10 +33,10 @@ describe('display formatting', () => {
   })
 
   it('formats quantities with at most 2 decimals and a decimal comma', () => {
-    expect(formatQty(1.5)).toBe('1,500')
-    expect(formatQty(20)).toBe('20,000')
+    expect(formatQty(1.5)).toBe('1,5')
+    expect(formatQty(20)).toBe('20')
     expect(formatQty(5.125)).toBe('5,125')
-    expect(formatQty(1250)).toBe('1.250,000')
+    expect(formatQty(1250)).toBe('1.250')
     expect(formatQty(undefined)).toBe('')
   })
 

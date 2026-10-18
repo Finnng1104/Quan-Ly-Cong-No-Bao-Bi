@@ -2,8 +2,8 @@
 // same strings as the web app's `src/lib/format.js`, so old and new history entries read alike.
 
 const moneyFormat = new Intl.NumberFormat('vi-VN')
-// Always 3 decimals ("5,100"): the customer reads quantities this way, and it matches the 3 decimals we store.
-const qtyFormat = new Intl.NumberFormat('vi-VN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })
+// Up to the 3 decimals we store, so 5.125 is not shown rounded to 5,13 next to its amount.
+const qtyFormat = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 3 })
 
 /** 12500 -> "12.500" */
 export function formatMoney(value: number | null | undefined): string {
@@ -11,7 +11,7 @@ export function formatMoney(value: number | null | undefined): string {
   return moneyFormat.format(Math.round(Number(value)))
 }
 
-/** 1.5 -> "1,500", 20 -> "20,000" */
+/** 1.5 -> "1,5", 20 -> "20", 5.125 -> "5,125" */
 export function formatQty(value: number | null | undefined): string {
   if (value === null || value === undefined) return ''
   return qtyFormat.format(Number(value))
