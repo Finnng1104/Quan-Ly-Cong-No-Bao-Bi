@@ -374,7 +374,12 @@ try {
   Write-Log 'Sao lưu dữ liệu trước khi cập nhật...'
   $backup = Invoke-Qlcn $AppDir @('backup', '--trigger', 'pre-update', '--data-dir', $DataRoot) $null
   $line = $backup.Output | Where-Object { "$_" -like 'BACKUP_FILE=*' } | Select-Object -Last 1
-  if ($backup.ExitCode -ne 0 -or -not $line) {
+  # Only the local snapshot is needed to roll back; a non-zero exit can just mean an unplugged
+  # drive or a failed online copy, reported by the installed (old) version.
+  if ($backup.ExitCode -ne 0) {
+    Write-Log 'Cảnh báo: có nơi sao lưu (ổ ngoài/online) chưa chép được, bản trên máy vẫn được dùng'
+  }
+  if (-not $line -or -not (Test-Path ("$line").Substring('BACKUP_FILE='.Length))) {
     Write-Log 'LỖI: Không sao lưu được dữ liệu — hủy cập nhật, bật lại bản cũ.'
     Start-ServerTask
     throw 'Không sao lưu được dữ liệu'

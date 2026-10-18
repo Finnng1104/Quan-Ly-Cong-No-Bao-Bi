@@ -275,10 +275,14 @@ agent_stop
 wait_stopped "$PORT" || log "Cảnh báo: dịch vụ chưa dừng hẳn"
 
 log "Sao lưu dữ liệu trước khi cập nhật..."
+# Only the local snapshot is needed to roll back. `backup` also exits non-zero when a drive is
+# unplugged or the online copy fails, and that exit code comes from the installed (old) version,
+# so it is logged but not treated as fatal: the BACKUP_FILE line decides.
 BACKUP_OUTPUT="$("$OLD_NODE" "$OLD_MAIN" backup --trigger pre-update --data-dir "$HOME_DIR" 2>> "$LOG")" \
-  || abort_update "Không sao lưu được dữ liệu"
+  || log "Cảnh báo: có nơi sao lưu (ổ ngoài/online) chưa chép được, bản trên máy vẫn được dùng"
+printf '%s\n' "$BACKUP_OUTPUT" >> "$LOG"
 BACKUP_FILE="$(printf '%s\n' "$BACKUP_OUTPUT" | grep '^BACKUP_FILE=' | tail -1 | cut -d= -f2-)"
-[ -n "$BACKUP_FILE" ] || abort_update "Không xác định được file sao lưu"
+[ -n "$BACKUP_FILE" ] && [ -f "$BACKUP_FILE" ] || abort_update "Không sao lưu được dữ liệu"
 log "Đã sao lưu: $BACKUP_FILE"
 
 rm -rf "$PREV_DIR"
