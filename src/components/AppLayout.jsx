@@ -113,7 +113,8 @@ export default function AppLayout() {
       </header>
 
       {/* ===== Content ===== */}
-      <main className="mx-auto w-full max-w-3xl px-4 pb-28 pt-4 lg:ml-64 lg:max-w-5xl lg:px-8 lg:pb-10">
+      {/* No w-full: with lg:ml-64 it would make main 100% + 256px wide and push the right edge off-screen. */}
+      <main className="mx-auto max-w-3xl px-4 pb-28 pt-4 lg:ml-64 lg:max-w-5xl lg:px-8 lg:pb-10">
         <HealthBanner />
         <Outlet />
       </main>
