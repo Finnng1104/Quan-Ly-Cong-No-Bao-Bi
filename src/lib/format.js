@@ -7,9 +7,13 @@ export function fmtMoney(n) {
   return moneyFmt.format(Math.round(Number(n)))
 }
 
+// Always 3 decimals ("5,100"): the customer reads quantities this way, and the server stores 3 decimals.
+// Must match formatQty in server/src/shared/format.ts so edit-history text reads the same.
+const qtyFmt = new Intl.NumberFormat('vi-VN', { minimumFractionDigits: 3, maximumFractionDigits: 3 })
+
 export function fmtQty(n) {
   if (n === null || n === undefined) return ''
-  return new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 }).format(Number(n))
+  return qtyFmt.format(Number(n))
 }
 
 // 'YYYY-MM-DD' -> 'dd/mm/yyyy'
