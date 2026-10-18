@@ -13,6 +13,14 @@ import { Avatar } from '../components/pickers'
 const EMPTY_DAY = { orders: 0, orderCount: 0, payments: 0, paymentCount: 0, returns: 0 }
 const EMPTY_MONTH = { orders: 0, payments: 0, returns: 0, orderCount: 0 }
 
+// Shop debts run into tens of millions; "22tr" fits the narrow axis where "22000k" was cut off.
+const axisMoneyFmt = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 1 })
+function fmtAxisMoney(value) {
+  if (Math.abs(value) >= 1_000_000) return `${axisMoneyFmt.format(value / 1_000_000)}tr`
+  if (value === 0) return '0'
+  return `${axisMoneyFmt.format(value / 1000)}k`
+}
+
 export default function DashboardPage() {
   const [date, setDate] = useState(todayISO())
   const dataVersion = useStore((s) => s.dataVersion)
@@ -139,7 +147,7 @@ export default function DashboardPage() {
                 tickLine={false}
               />
               <YAxis
-                tickFormatter={(v) => `${Math.round(v / 1000)}k`}
+                tickFormatter={fmtAxisMoney}
                 tick={{ fontSize: 10, fill: '#94a3b8' }}
                 axisLine={false}
                 tickLine={false}
