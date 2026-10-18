@@ -74,7 +74,8 @@ export default function OrderFormPage() {
           type: l.type || 'sell',
           productId: l.productId,
           unitId: l.unitId,
-          qty: String(l.qty),
+          // Same "5,100" the ticket shows. No thousands separator, so parseQty reads it back as is.
+          qty: Number(l.qty).toFixed(3).replace('.', ','),
           price: String(l.price),
         })),
       )
