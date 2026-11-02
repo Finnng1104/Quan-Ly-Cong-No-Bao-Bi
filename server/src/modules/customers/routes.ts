@@ -12,6 +12,7 @@ import {
 } from '../../shared/validation.js'
 import { customerBalance } from '../ledger/queries.js'
 import {
+  deleteCustomer,
   insertCustomer,
   listCustomers,
   requireCustomer,
@@ -115,5 +116,12 @@ export function registerCustomerRoutes(app: FastifyInstance, ctx: AppContext): v
       },
     }
     return toCustomerDto(updateCustomer(ctx.db, branchId, id, merged, ctx.now().toISOString()))
+  })
+
+  app.delete('/api/customers/:id', async (request, reply) => {
+    const { branchId } = authorize(request, 'customers:write')
+    const { id } = request.params as { id: string }
+    deleteCustomer(ctx.db, branchId, id, ctx.now().toISOString())
+    reply.status(204)
   })
 }

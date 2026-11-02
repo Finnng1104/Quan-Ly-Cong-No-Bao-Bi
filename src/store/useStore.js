@@ -107,6 +107,11 @@ export const useStore = create(
           bump()
           return customer
         },
+        removeCustomer: async (id) => {
+          await api.customers.remove(id)
+          await get().refreshCustomers()
+          bump()
+        },
 
         // ---------- products / units ----------
         addProduct: async (name) => {

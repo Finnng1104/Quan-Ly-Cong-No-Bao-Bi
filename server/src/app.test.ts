@@ -37,7 +37,7 @@ describe('http app', () => {
       expect(response.json()).toEqual({
         status: 'ok',
         version: '1.2.3',
-        schemaVersion: 1,
+        schemaVersion: 2,
         db: { ok: true },
         lastBackup: null,
         warnings: [],

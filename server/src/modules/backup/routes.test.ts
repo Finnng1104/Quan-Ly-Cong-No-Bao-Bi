@@ -65,7 +65,7 @@ describe('backup routes', () => {
           eligible: !path.basename(volumePath).startsWith('Installer'),
           freeBytes: 1_000_000_000,
         }),
-        supportedSchemaVersion: 1,
+        supportedSchemaVersion: 2,
         scheduler: { noteBackupResult: () => undefined, requestSync: () => undefined },
         requestRestore: (staged) => restoreRequests.push(staged),
       }),

@@ -138,6 +138,7 @@ export default function CustomerDetailPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [adjustOpen, setAdjustOpen] = useState(false)
   const [delAdjust, setDelAdjust] = useState(null)
+  const [deleteOpen, setDeleteOpen] = useState(false)
   const [ledgerLimit, setLedgerLimit] = useState(LEDGER_PAGE_SIZE)
   const toast = useToast()
   const run = useAction()
@@ -193,6 +194,9 @@ export default function CustomerDetailPage() {
         </div>
         <Button variant="outline" size="icon" onClick={() => setEditOpen(true)}>
           <Pencil size={17} />
+        </Button>
+        <Button variant="outline" size="icon" onClick={() => setDeleteOpen(true)} aria-label="Xóa khách">
+          <Trash2 size={17} />
         </Button>
       </div>
 
@@ -418,6 +422,20 @@ export default function CustomerDetailPage() {
         }
         title="Xóa phát sinh?"
         message="Khoản phát sinh sẽ bị xóa và công nợ cập nhật lại."
+      />
+
+      <Confirm
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        onConfirm={() =>
+          run(async () => {
+            await data.removeCustomer(customer.id)
+            toast.success('Đã xóa khách')
+            navigate('/khach', { replace: true })
+          })
+        }
+        title={`Xóa khách ${customer.name}?`}
+        message="Khách sẽ biến khỏi danh sách và không còn tính vào tổng công nợ. Đơn và thanh toán cũ vẫn được giữ trong dữ liệu."
       />
 
       <CustomerForm

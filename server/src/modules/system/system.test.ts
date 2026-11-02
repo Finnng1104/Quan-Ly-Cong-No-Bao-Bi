@@ -135,7 +135,7 @@ describe('diagnostics file', () => {
 
     // useful
     expect(text).toContain('"version": "1.0.0"')
-    expect(text).toContain('"schemaVersion": 1')
+    expect(text).toContain('"schemaVersion": 2')
     expect(text).toContain('"quickCheck": "ok"')
     expect(text).toContain('server started')
     expect(text).toContain('"bucket": "shop"')

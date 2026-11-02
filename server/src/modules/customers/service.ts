@@ -38,9 +38,9 @@ export function toCustomerDto(row: CustomerRow): CustomerDto {
 }
 
 export function findCustomer(db: Database, branchId: string, id: string): CustomerRow | undefined {
-  return db.prepare('SELECT * FROM customers WHERE id = ? AND branch_id = ?').get(id, branchId) as
-    | CustomerRow
-    | undefined
+  return db
+    .prepare('SELECT * FROM customers WHERE id = ? AND branch_id = ? AND deleted_at IS NULL')
+    .get(id, branchId) as CustomerRow | undefined
 }
 
 export function requireCustomer(db: Database, branchId: string, id: string): CustomerRow {
@@ -115,6 +115,20 @@ export function updateCustomer(
   return requireCustomer(db, branchId, id)
 }
 
+/**
+ * Soft delete: the customer's orders, payments and returns stay in the database, but the customer
+ * leaves every list and debt total (see the ledger_events view).
+ */
+export function deleteCustomer(db: Database, branchId: string, id: string, nowIso: string): void {
+  requireCustomer(db, branchId, id)
+  db.prepare('UPDATE customers SET deleted_at = ?, updated_at = ? WHERE id = ? AND branch_id = ?').run(
+    nowIso,
+    nowIso,
+    id,
+    branchId,
+  )
+}
+
 export type CustomerSort = 'debt_desc' | 'debt_asc'
 
 export interface ListCustomersParams {
@@ -187,7 +201,7 @@ export function listCustomers(db: Database, branchId: string, params: ListCustom
         FROM customers c
         LEFT JOIN bal ON bal.customer_id = c.id
         LEFT JOIN act ON act.customer_id = c.id
-       WHERE c.branch_id = @branchId AND c.search_text LIKE @like ESCAPE '\\'
+       WHERE c.branch_id = @branchId AND c.deleted_at IS NULL AND c.search_text LIKE @like ESCAPE '\\'
     )`
 
   const named = { branchId, asOf: params.asOf, like }

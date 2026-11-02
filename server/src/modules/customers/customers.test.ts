@@ -197,4 +197,43 @@ describe('customers', () => {
       expect(late.body.balance).toBe(210500)
     })
   })
+
+  describe('delete', () => {
+    it('hides a customer with transactions from the list, the detail and the debt total', async () => {
+      const keep = await create({ name: 'Cô Lan', openingDebt: { amount: 1000, date: '2026-09-01' } })
+      const gone = await create({ name: 'Thanh Hoa Jeans', openingDebt: { amount: 6485, date: '2026-09-01' } })
+      const payment = await t.api.post('/api/payments', {
+        customerId: gone.id,
+        date: '2026-09-02',
+        amount: 485,
+      })
+      expect(payment.status, JSON.stringify(payment.body)).toBe(201)
+
+      const response = await t.api.delete(`/api/customers/${gone.id}`)
+
+      expect(response.status).toBe(204)
+      const list = await t.api.get('/api/customers')
+      expect(list.body.items.map((item: { id: string }) => item.id)).toEqual([keep.id])
+      expect(list.body.summary.totalDebt).toBe(1000)
+      expect((await t.api.get(`/api/customers/${gone.id}`)).status).toBe(404)
+      expect((await t.api.get('/api/customers?q=hoa')).body.items).toHaveLength(0)
+    })
+
+    it('rejects new transactions for a deleted customer', async () => {
+      const customer = await create({ name: 'Ông A' })
+      await t.api.delete(`/api/customers/${customer.id}`)
+
+      const payment = await t.api.post('/api/payments', { customerId: customer.id, date: '2026-10-11', amount: 1 })
+
+      expect(payment.status).toBe(404)
+    })
+
+    it('returns 404 for an unknown or already deleted customer', async () => {
+      const customer = await create({ name: 'Ông B' })
+      await t.api.delete(`/api/customers/${customer.id}`)
+
+      expect((await t.api.delete(`/api/customers/${customer.id}`)).status).toBe(404)
+      expect((await t.api.delete('/api/customers/missing')).status).toBe(404)
+    })
+  })
 })

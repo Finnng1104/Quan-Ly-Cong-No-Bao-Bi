@@ -58,6 +58,7 @@ export const api = {
     get: (id, asOf) => request('GET', `/customers/${id}`, { query: { asOf } }),
     create: (payload) => request('POST', '/customers', { body: payload }),
     update: (id, payload) => request('PATCH', `/customers/${id}`, { body: payload }),
+    remove: (id) => request('DELETE', `/customers/${id}`),
     ledger: (id, { until, limit, offset } = {}) =>
       request('GET', `/customers/${id}/ledger`, { query: { until, limit, offset } }),
     statement: (id, { from, to }) => request('GET', `/customers/${id}/statement`, { query: { from, to } }),

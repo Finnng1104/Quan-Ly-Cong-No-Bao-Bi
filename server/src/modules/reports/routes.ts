@@ -175,7 +175,7 @@ export function registerReportRoutes(app: FastifyInstance, ctx: AppContext): voi
            FROM customers c
            LEFT JOIN ledger_events e
                   ON e.customer_id = c.id AND e.branch_id = c.branch_id AND e.date <= @asOf
-          WHERE c.branch_id = @branchId
+          WHERE c.branch_id = @branchId AND c.deleted_at IS NULL
           GROUP BY c.id
           ORDER BY c.rowid`,
       )
