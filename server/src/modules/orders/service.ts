@@ -5,11 +5,13 @@ import { formatCode, nextCounter } from '../../shared/counters.js'
 import {
   bpToPercent,
   computeOrderTotals,
+  fromPriceMilli,
   fromQtyMilli,
   MoneyError,
   percentToBp,
   type OrderLineType,
   type OrderTotals,
+  toPriceMilli,
 } from '../../shared/money.js'
 import { getDefaultVatRateBp } from '../settings/routes.js'
 import { requireCustomer } from '../customers/service.js'
@@ -44,7 +46,7 @@ interface LineRow {
   product_id: string
   unit_id: string
   qty_milli: number
-  price: number
+  price_milli: number
   amount: number
 }
 
@@ -124,6 +126,7 @@ interface PreparedLine {
   unitId: string
   qtyMilli: number
   qty: number
+  priceMilli: number
   price: number
   amount: number
 }
@@ -162,7 +165,7 @@ export function requireOrderRow(ctx: AppContext, branchId: string, id: string): 
 function readLines(ctx: AppContext, orderId: string): LineRow[] {
   return ctx.db
     .prepare(
-      `SELECT id, type, product_id, unit_id, qty_milli, price, amount
+      `SELECT id, type, product_id, unit_id, qty_milli, price_milli, amount
          FROM order_lines WHERE order_id = ? ORDER BY position`,
     )
     .all(orderId) as LineRow[]
@@ -187,7 +190,7 @@ export function toOrderDto(ctx: AppContext, row: OrderRow): OrderDto {
       productId: line.product_id,
       unitId: line.unit_id,
       qty: fromQtyMilli(line.qty_milli),
-      price: line.price,
+      price: fromPriceMilli(line.price_milli),
       amount: line.amount,
     })),
     vat:
@@ -260,6 +263,7 @@ function prepareOrder(
       unitId: line.unitId,
       qtyMilli,
       qty: fromQtyMilli(qtyMilli),
+      priceMilli: toPriceMilli(line.price),
       price: line.price,
       amount: 0, // filled below from the computed totals
     }
@@ -298,7 +302,7 @@ function prepareOrder(
   let totals: OrderTotals
   try {
     totals = computeOrderTotals({
-      lines: lines.map((line) => ({ type: line.type, qtyMilli: line.qtyMilli, price: line.price })),
+      lines: lines.map((line) => ({ type: line.type, qtyMilli: line.qtyMilli, priceMilli: line.priceMilli })),
       vat,
       fees,
     })
@@ -317,7 +321,7 @@ function prepareOrder(
 
 function writeContent(ctx: AppContext, orderId: string, prepared: PreparedOrder): void {
   const insertLine = ctx.db.prepare(
-    `INSERT INTO order_lines (id, order_id, position, type, product_id, unit_id, qty_milli, price, amount)
+    `INSERT INTO order_lines (id, order_id, position, type, product_id, unit_id, qty_milli, price_milli, amount)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
   prepared.lines.forEach((line, position) => {
@@ -329,7 +333,7 @@ function writeContent(ctx: AppContext, orderId: string, prepared: PreparedOrder)
       line.productId,
       line.unitId,
       line.qtyMilli,
-      line.price,
+      line.priceMilli,
       line.amount,
     )
   })
@@ -399,7 +403,7 @@ function diffableFromRow(ctx: AppContext, row: OrderRow): DiffableOrder {
       productId: line.product_id,
       unitId: line.unit_id,
       qty: fromQtyMilli(line.qty_milli),
-      price: line.price,
+      price: fromPriceMilli(line.price_milli),
     })),
   }
 }

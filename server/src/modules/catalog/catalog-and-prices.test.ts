@@ -96,11 +96,11 @@ describe('price book', () => {
   it('validates product, unit and price', async () => {
     const unknownProduct = await setPrice(customerId, 'nope', 500)
     const negative = await setPrice(customerId, productId, -1)
-    const fractional = await setPrice(customerId, productId, 10.5)
+    const tooPrecise = await setPrice(customerId, productId, 10.0005)
 
     expect(unknownProduct.status).toBe(400)
     expect(negative.status).toBe(400)
-    expect(fractional.status).toBe(400)
+    expect(tooPrecise.status).toBe(400)
     expect((await t.api.put('/api/customers/nope/prices', { productId, unitId, price: 1 })).status).toBe(404)
   })
 

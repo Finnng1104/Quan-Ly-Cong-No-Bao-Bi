@@ -159,9 +159,14 @@ describe('orders', () => {
       await expectFieldError({ lines: [line({ qty: 1.0005 })] }, 'lines[0].qty')
     })
 
-    it('rejects a negative or fractional price', async () => {
+    it('rejects a negative price or one with more than 3 decimals', async () => {
       await expectFieldError({ lines: [line({ price: -1 })] }, 'lines[0].price')
-      await expectFieldError({ lines: [line({ price: 10.5 })] }, 'lines[0].price')
+      await expectFieldError({ lines: [line({ price: 10.0005 })] }, 'lines[0].price')
+    })
+
+    it('accepts a price with decimals and rounds the line amount to whole VND', async () => {
+      const order = await createOrder({ lines: [line({ qty: 100, price: 5250.5 })] })
+      expect(order.lines[0]).toMatchObject({ qty: 100, price: 5250.5, amount: 525_050 })
     })
 
     it('rejects a bad date', async () => {

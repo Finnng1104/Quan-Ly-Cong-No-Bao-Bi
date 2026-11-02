@@ -54,11 +54,18 @@ export const positiveMoneySchema = moneySchema.refine((value) => value > 0, {
   error: 'Phải lớn hơn 0',
 })
 
+// Unit prices may carry up to 3 decimals (stored as milli-units, see money.ts).
 export const priceSchema = z
   .number({ error: 'Phải là số' })
-  .int({ error: 'Phải là số nguyên' })
   .min(0, { error: 'Không được âm' })
   .max(MAX_PRICE, { error: 'Giá quá lớn' })
+  .refine(
+    (value) => {
+      const scaled = value * 1000
+      return Math.abs(scaled - Math.round(scaled)) <= 1e-6
+    },
+    { error: 'Giá tối đa 3 chữ số thập phân' },
+  )
 
 export const qtySchema = z
   .number({ error: 'Phải là số' })

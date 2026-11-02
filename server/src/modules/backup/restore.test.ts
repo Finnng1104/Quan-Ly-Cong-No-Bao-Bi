@@ -44,7 +44,7 @@ describe('restore', () => {
     dbPath,
     backupsDir,
     source,
-    supportedSchemaVersion: 2,
+    supportedSchemaVersion: 3,
     logger,
     now: clock,
     isServerRunning: async () => false,

@@ -16,7 +16,18 @@ import { api } from '../api/httpApi'
 import { useAsync } from '../hooks/useAsync'
 import { useAction } from '../hooks/useAction'
 import { useCustomerPrices, usePurchasedReturned } from '../hooks/customerData'
-import { todayISO, fmtMoney, fmtQty, parseQty, uid } from '../lib/format'
+import {
+  todayISO,
+  fmtMoney,
+  fmtPrice,
+  fmtQty,
+  formatPriceInput,
+  parsePrice,
+  parseQty,
+  priceToInput,
+  sanitizePriceInput,
+  uid,
+} from '../lib/format'
 import { Card, Button, Field, Input, Switch, Textarea } from '../components/ui'
 import { ErrorCard, LoadingCard } from '../components/AsyncState'
 import { PickerModal, PickerButton, Avatar } from '../components/pickers'
@@ -75,7 +86,7 @@ export default function OrderFormPage() {
           productId: l.productId,
           unitId: l.unitId,
           qty: String(l.qty),
-          price: String(l.price),
+          price: priceToInput(l.price),
         })),
       )
     } else if (data.orderDraft && !sp.get('khach')) {
@@ -104,7 +115,7 @@ export default function OrderFormPage() {
     return () => clearTimeout(t)
   }, [customerId, date, lines, vatEnabled, vatManual, note, fees, editing, setOrderDraft])
 
-  const lineAmount = (l) => Math.round(parseQty(l.qty) * (Number(l.price) || 0))
+  const lineAmount = (l) => Math.round(parseQty(l.qty) * parsePrice(l.price))
   const signedAmount = (l) => (l.type === 'return' ? -lineAmount(l) : lineAmount(l))
   const goodsTotal = lines.reduce((s, l) => s + signedAmount(l), 0)
   const sellTotal = lines.reduce(
@@ -131,7 +142,7 @@ export default function OrderFormPage() {
     const patch = { productId: product.id }
     if (unitId) {
       const p = getPrice(product.id, unitId)
-      if (p !== null) patch.price = String(p)
+      if (p !== null) patch.price = priceToInput(p)
     }
     updateLine(lid, patch)
   }
@@ -141,7 +152,7 @@ export default function OrderFormPage() {
     const patch = { unitId }
     if (l?.productId) {
       const p = getPrice(l.productId, unitId)
-      if (p !== null) patch.price = String(p)
+      if (p !== null) patch.price = priceToInput(p)
     }
     updateLine(lid, patch)
   }
@@ -178,7 +189,7 @@ export default function OrderFormPage() {
             productId: l.productId,
             unitId: l.unitId,
             qty: parseQty(l.qty),
-            price: Number(l.price) || 0,
+            price: parsePrice(l.price),
           })),
           vat: vatEnabled
             ? { ratePercent: vatRate, ...(vatManual !== '' ? { amount: Number(vatManual) || 0 } : {}) }
@@ -235,7 +246,7 @@ export default function OrderFormPage() {
           const isReturn = l.type === 'return'
           const bookPrice = l.productId && l.unitId ? getPrice(l.productId, l.unitId) : null
           const priceDiffers =
-            l.productId && l.unitId && l.price !== '' && Number(l.price) !== bookPrice
+            l.productId && l.unitId && l.price !== '' && parsePrice(l.price) !== bookPrice
           // cảnh báo trả vượt đã mua (không chặn)
           const pr = l.productId && l.unitId ? boughtMap.get(`${l.productId}|${l.unitId}`) : null
           const overReturn =
@@ -336,8 +347,8 @@ export default function OrderFormPage() {
                 </div>
               )}
 
-              {/* SL + giá + thành tiền */}
-              <div className="mt-2.5 grid grid-cols-[1fr_1fr_auto] items-end gap-2.5">
+              {/* SL + giá, thành tiền nằm dòng dưới */}
+              <div className="mt-2.5 grid grid-cols-2 gap-2.5">
                 <Field label="Số lượng">
                   <Input
                     inputMode="decimal"
@@ -349,24 +360,27 @@ export default function OrderFormPage() {
                 </Field>
                 <Field label="Giá">
                   <Input
-                    inputMode="numeric"
-                    value={l.price}
-                    onChange={(e) => updateLine(l.id, { price: e.target.value.replace(/[^0-9]/g, '') })}
+                    inputMode="decimal"
+                    value={formatPriceInput(l.price)}
+                    onChange={(e) => updateLine(l.id, { price: sanitizePriceInput(e.target.value) })}
                     placeholder="0"
                     className="text-right font-semibold"
                   />
                 </Field>
-                <div className="pb-1 text-right">
-                  <p className="text-[10.5px] font-semibold uppercase text-slate-400">Thành tiền</p>
-                  <p
-                    className={`text-[16px] font-bold tabular-nums ${isReturn ? 'text-amber-600' : 'text-slate-800'
-                      }`}
-                  >
-                    {isReturn && lineAmount(l) > 0 ? '-' : ''}
-                    {fmtMoney(lineAmount(l))}
-                  </p>
-                </div>
               </div>
+
+              {/* Own row so a long amount can never squeeze the inputs */}
+              <div className="mt-2 flex items-baseline justify-between gap-3">
+                <span className="text-[10.5px] font-semibold uppercase text-slate-400">Thành tiền</span>
+                <span
+                  className={`min-w-0 break-all text-right text-[16px] font-bold tabular-nums ${isReturn ? 'text-amber-600' : 'text-slate-800'
+                    }`}
+                >
+                  {isReturn && lineAmount(l) > 0 ? '-' : ''}
+                  {fmtMoney(lineAmount(l))}
+                </span>
+              </div>
+              {idx === 0 && <p className="mt-1.5 text-xs text-slate-400">Giá có đồng lẻ thì gõ dấu phẩy, ví dụ 5250,5. Thành tiền làm tròn đến đồng.</p>}
 
               {/* gợi ý lưu bảng giá */}
               {priceDiffers && customerId && (
@@ -377,7 +391,7 @@ export default function OrderFormPage() {
                         customerId,
                         productId: l.productId,
                         unitId: l.unitId,
-                        price: Number(l.price),
+                        price: parsePrice(l.price),
                       })
                       toast.success(
                         bookPrice === null ? 'Đã lưu giá cho khách này' : 'Đã cập nhật bảng giá',
@@ -389,7 +403,7 @@ export default function OrderFormPage() {
                   <BadgeDollarSign size={14} />
                   {bookPrice === null
                     ? 'Lưu làm giá của khách này'
-                    : `Cập nhật bảng giá (${fmtMoney(bookPrice)} → ${fmtMoney(l.price)})`}
+                    : `Cập nhật bảng giá (${fmtPrice(bookPrice)} → ${fmtPrice(parsePrice(l.price))})`}
                 </button>
               )}
               {l.productId && l.unitId && bookPrice === null && l.price === '' && (

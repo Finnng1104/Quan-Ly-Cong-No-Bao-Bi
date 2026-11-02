@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { authorize, type AppContext } from '../../http/context.js'
 import { AppError } from '../../shared/errors.js'
+import { fromPriceMilli, toPriceMilli } from '../../shared/money.js'
 import { idSchema, parseInput, priceSchema } from '../../shared/validation.js'
 import { findCatalogItem } from '../catalog/routes.js'
 import { requireCustomer } from '../customers/service.js'
@@ -11,7 +12,7 @@ interface PriceRow {
   id: string
   product_id: string
   unit_id: string
-  price: number
+  price_milli: number
 }
 
 export interface PriceDto {
@@ -25,7 +26,7 @@ const toDto = (row: PriceRow): PriceDto => ({
   id: row.id,
   productId: row.product_id,
   unitId: row.unit_id,
-  price: row.price,
+  price: fromPriceMilli(row.price_milli),
 })
 
 const upsertSchema = z.object({
@@ -39,7 +40,7 @@ export function registerPriceBookRoutes(app: FastifyInstance, ctx: AppContext): 
   const listPrices = (branchId: string, customerId: string): PriceDto[] => {
     const rows = ctx.db
       .prepare(
-        `SELECT pb.id, pb.product_id, pb.unit_id, pb.price
+        `SELECT pb.id, pb.product_id, pb.unit_id, pb.price_milli
            FROM price_book pb
            JOIN products p ON p.id = pb.product_id AND p.deleted_at IS NULL
            JOIN units u ON u.id = pb.unit_id AND u.deleted_at IS NULL
@@ -78,14 +79,14 @@ export function registerPriceBookRoutes(app: FastifyInstance, ctx: AppContext): 
 
     const id = existing?.id ?? randomUUID()
     if (existing) {
-      ctx.db.prepare('UPDATE price_book SET price = ? WHERE id = ?').run(body.price, id)
+      ctx.db.prepare('UPDATE price_book SET price_milli = ? WHERE id = ?').run(toPriceMilli(body.price), id)
     } else {
       ctx.db
         .prepare(
-          `INSERT INTO price_book (id, branch_id, customer_id, product_id, unit_id, price)
+          `INSERT INTO price_book (id, branch_id, customer_id, product_id, unit_id, price_milli)
            VALUES (?, ?, ?, ?, ?, ?)`,
         )
-        .run(id, branchId, customerId, body.productId, body.unitId, body.price)
+        .run(id, branchId, customerId, body.productId, body.unitId, toPriceMilli(body.price))
     }
     return { id, productId: body.productId, unitId: body.unitId, price: body.price } satisfies PriceDto
   })
@@ -110,16 +111,16 @@ export function registerPriceBookRoutes(app: FastifyInstance, ctx: AppContext): 
         ctx.db.prepare('DELETE FROM price_book WHERE branch_id = ? AND customer_id = ?').run(branchId, toId)
         const source = ctx.db
           .prepare(
-            `SELECT product_id, unit_id, price FROM price_book
+            `SELECT product_id, unit_id, price_milli FROM price_book
               WHERE branch_id = ? AND customer_id = ? ORDER BY rowid`,
           )
-          .all(branchId, fromId) as { product_id: string; unit_id: string; price: number }[]
+          .all(branchId, fromId) as { product_id: string; unit_id: string; price_milli: number }[]
         const insert = ctx.db.prepare(
-          `INSERT INTO price_book (id, branch_id, customer_id, product_id, unit_id, price)
+          `INSERT INTO price_book (id, branch_id, customer_id, product_id, unit_id, price_milli)
            VALUES (?, ?, ?, ?, ?, ?)`,
         )
         for (const entry of source) {
-          insert.run(randomUUID(), branchId, toId, entry.product_id, entry.unit_id, entry.price)
+          insert.run(randomUUID(), branchId, toId, entry.product_id, entry.unit_id, entry.price_milli)
         }
       })
       copy.immediate()

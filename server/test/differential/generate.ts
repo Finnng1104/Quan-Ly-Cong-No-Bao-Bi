@@ -2,7 +2,7 @@
 // A seeded generator means any failure can be reproduced from the seed printed in the test name.
 
 import { addDays } from '../../src/shared/dates.js'
-import { computeOrderTotals, toQtyMilli } from '../../src/shared/money.js'
+import { computeOrderTotals, toPriceMilli, toQtyMilli } from '../../src/shared/money.js'
 import type {
   LedgerAdjustment,
   LedgerCustomer,
@@ -88,7 +88,7 @@ export function generateDataset(seed: number): GeneratedDataset {
       lines: lines.map((line) => ({
         type: line.type ?? 'sell',
         qtyMilli: toQtyMilli(line.qty),
-        price: line.price,
+        priceMilli: toPriceMilli(line.price),
       })),
       vat: useVat ? { rateBp: 800, amount: manualVat ? int(0, 20) * 500 : undefined } : null,
       fees,

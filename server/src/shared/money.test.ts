@@ -3,9 +3,11 @@ import {
   bpToPercent,
   computeOrderTotals,
   fromQtyMilli,
+  fromPriceMilli,
   lineAmount,
   MoneyError,
   percentToBp,
+  toPriceMilli,
   toQtyMilli,
   vatFromSellTotal,
 } from './money.js'
@@ -29,24 +31,49 @@ describe('toQtyMilli / fromQtyMilli', () => {
   })
 })
 
+describe('toPriceMilli', () => {
+  it('scales a price by 1000 and keeps up to 3 decimals', () => {
+    expect(toPriceMilli(5250)).toBe(5_250_000)
+    expect(toPriceMilli(5250.5)).toBe(5_250_500)
+    expect(toPriceMilli(0.001)).toBe(1)
+    expect(toPriceMilli(1.005)).toBe(1_005)
+  })
+
+  it('rejects more than 3 decimals and non-finite numbers', () => {
+    expect(() => toPriceMilli(0.0005)).toThrowError(MoneyError)
+    expect(() => toPriceMilli(Number.NaN)).toThrowError(MoneyError)
+  })
+
+  it('round-trips with fromPriceMilli', () => {
+    expect(fromPriceMilli(toPriceMilli(5250.75))).toBe(5250.75)
+  })
+})
+
 describe('lineAmount', () => {
+  // Arguments are milli-units: qty 20 = 20_000, price 500 đ = 500_000.
   it('multiplies qty by price in whole VND', () => {
-    expect(lineAmount(20_000, 500)).toBe(10_000)
-    expect(lineAmount(1_500, 18_000)).toBe(27_000)
-    expect(lineAmount(500, 32_000)).toBe(16_000)
+    expect(lineAmount(20_000, 500_000)).toBe(10_000)
+    expect(lineAmount(1_500, 18_000_000)).toBe(27_000)
+    expect(lineAmount(500, 32_000_000)).toBe(16_000)
+  })
+
+  it('supports unit prices with decimals', () => {
+    expect(lineAmount(100_000, 5_250)).toBe(525) // 100 x 5,25 đ
+    expect(lineAmount(3_000, 250)).toBe(1) // 3 x 0,25 = 0,75 -> 1
+    expect(lineAmount(1_000, 400)).toBe(0) // 0,4 -> 0
   })
 
   it('rounds half up, even where floating point would round down', () => {
     // 1,005 × 100 = 100,5 exactly. Math.round(1.005 * 100) gives 100 because 1.005*100 = 100.49999999999999.
-    expect(lineAmount(1_005, 100)).toBe(101)
-    expect(lineAmount(500, 1)).toBe(1) // 0,5 -> 1
-    expect(lineAmount(499, 1)).toBe(0) // 0,499 -> 0
-    expect(lineAmount(1_500, 1)).toBe(2) // 1,5 -> 2
+    expect(lineAmount(1_005, 100_000)).toBe(101)
+    expect(lineAmount(500, 1_000)).toBe(1) // 0,5 -> 1
+    expect(lineAmount(499, 1_000)).toBe(0) // 0,499 -> 0
+    expect(lineAmount(1_500, 1_000)).toBe(2) // 1,5 -> 2
   })
 
   it('stays exact when the product exceeds 2^53', () => {
-    // 1.000.000 units × 1.000.000.000 VND = 10^15, but qtyMilli × price = 10^18.
-    expect(lineAmount(1_000_000_000, 1_000_000_000)).toBe(1_000_000_000_000_000)
+    // 1.000.000 units × 1.000.000.000 VND = 10^15, but qtyMilli × priceMilli = 10^21.
+    expect(lineAmount(1_000_000_000, 1_000_000_000_000)).toBe(1_000_000_000_000_000)
   })
 
   it('rejects fractional or negative inputs and amounts beyond safe integers', () => {
@@ -93,8 +120,8 @@ describe('vatFromSellTotal', () => {
 })
 
 describe('computeOrderTotals', () => {
-  const sell = (qtyMilli: number, price: number) => ({ type: 'sell' as const, qtyMilli, price })
-  const back = (qtyMilli: number, price: number) => ({ type: 'return' as const, qtyMilli, price })
+  const sell = (qtyMilli: number, price: number) => ({ type: 'sell' as const, qtyMilli, priceMilli: price * 1000 })
+  const back = (qtyMilli: number, price: number) => ({ type: 'return' as const, qtyMilli, priceMilli: price * 1000 })
 
   it('subtracts return lines and computes VAT on sold goods only', () => {
     const totals = computeOrderTotals({

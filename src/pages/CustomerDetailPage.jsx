@@ -398,7 +398,7 @@ export default function CustomerDetailPage() {
                 </p>
                 <p className="text-[11.5px] text-slate-400">{unitName(data, p.unitId)}</p>
               </div>
-              <Money value={p.price} className="text-[13.5px] text-indigo-600" />
+              <span className="text-[13.5px] font-bold tabular-nums text-indigo-600">{fmtPrice(p.price)} đ</span>
             </div>
           ))}
         </Card>

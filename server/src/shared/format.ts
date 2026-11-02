@@ -3,12 +3,19 @@
 
 const moneyFormat = new Intl.NumberFormat('vi-VN')
 // Up to the 3 decimals we store, so 5.125 is not shown rounded to 5,13 next to its amount.
+const priceFormat = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 3 })
 const qtyFormat = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 3 })
 
 /** 12500 -> "12.500" */
 export function formatMoney(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '0'
   return moneyFormat.format(Math.round(Number(value)))
+}
+
+/** Unit price, up to the 3 decimals we store: 5250 -> "5.250", 0.5 -> "0,5", 5250.75 -> "5.250,75" */
+export function formatPrice(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '0'
+  return priceFormat.format(Number(value))
 }
 
 /** 1.5 -> "1,5", 20 -> "20", 5.125 -> "5,125" */

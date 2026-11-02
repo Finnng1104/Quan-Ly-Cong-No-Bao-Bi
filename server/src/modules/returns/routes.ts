@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { authorize, type AppContext } from '../../http/context.js'
 import { formatCode, nextCounter } from '../../shared/counters.js'
 import { AppError } from '../../shared/errors.js'
-import { fromQtyMilli, lineAmount, MoneyError } from '../../shared/money.js'
+import { fromPriceMilli, fromQtyMilli, lineAmount, MoneyError, toPriceMilli } from '../../shared/money.js'
 import {
   idSchema,
   isoDateSchema,
@@ -34,7 +34,7 @@ interface ReturnLineRow {
   product_id: string
   unit_id: string
   qty_milli: number
-  price: number
+  price_milli: number
   amount: number
 }
 
@@ -60,7 +60,7 @@ export function registerReturnRoutes(app: FastifyInstance, ctx: AppContext): voi
   const toDto = (row: ReturnRow) => {
     const lines = ctx.db
       .prepare(
-        `SELECT id, product_id, unit_id, qty_milli, price, amount
+        `SELECT id, product_id, unit_id, qty_milli, price_milli, amount
            FROM return_lines WHERE return_id = ? ORDER BY position`,
       )
       .all(row.id) as ReturnLineRow[]
@@ -75,7 +75,7 @@ export function registerReturnRoutes(app: FastifyInstance, ctx: AppContext): voi
         productId: line.product_id,
         unitId: line.unit_id,
         qty: fromQtyMilli(line.qty_milli),
-        price: line.price,
+        price: fromPriceMilli(line.price_milli),
         amount: line.amount,
       })),
       total: row.total,
@@ -124,14 +124,15 @@ export function registerReturnRoutes(app: FastifyInstance, ctx: AppContext): voi
 
     const prepared = body.lines.map((line, index) => {
       const qtyMilli = validateLineItem(ctx, branchId, line, `lines[${index}]`, null)
+      const priceMilli = toPriceMilli(line.price)
       let amount: number
       try {
-        amount = lineAmount(qtyMilli, line.price)
+        amount = lineAmount(qtyMilli, priceMilli)
       } catch (error) {
         if (error instanceof MoneyError) throw new AppError('VALIDATION_ERROR', 'Giá trị phiếu quá lớn')
         throw error
       }
-      return { id: randomUUID(), ...line, qtyMilli, amount }
+      return { id: randomUUID(), ...line, qtyMilli, priceMilli, amount }
     })
     const total = prepared.reduce((sum, line) => sum + line.amount, 0)
 
@@ -148,11 +149,11 @@ export function registerReturnRoutes(app: FastifyInstance, ctx: AppContext): voi
         .run(id, branchId, formatCode('TH', no), body.customerId, body.date, seq, total, body.reason, nowIso)
 
       const insertLine = ctx.db.prepare(
-        `INSERT INTO return_lines (id, return_id, position, product_id, unit_id, qty_milli, price, amount)
+        `INSERT INTO return_lines (id, return_id, position, product_id, unit_id, qty_milli, price_milli, amount)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       prepared.forEach((line, position) => {
-        insertLine.run(line.id, id, position, line.productId, line.unitId, line.qtyMilli, line.price, line.amount)
+        insertLine.run(line.id, id, position, line.productId, line.unitId, line.qtyMilli, line.priceMilli, line.amount)
       })
     })
     run.immediate()

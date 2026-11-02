@@ -163,7 +163,7 @@ describe('order totals vs the web app (mockApi.createOrder)', () => {
   // far apart they can be instead of assuming they never differ.
   it('stays within a few VND, differing only where floating point rounds a .5 down', async () => {
     const { createOrder } = await import('../../../src/api/mockApi.js')
-    const { computeOrderTotals, toQtyMilli } = await import('../../src/shared/money.js')
+    const { computeOrderTotals, toPriceMilli, toQtyMilli } = await import('../../src/shared/money.js')
 
     const random = createRng(424_242)
     const quantities = [0.125, 0.25, 0.5, 1, 1.005, 1.5, 2.125, 3, 10, 12.75, 0.333]
@@ -194,7 +194,7 @@ describe('order totals vs the web app (mockApi.createOrder)', () => {
       const original = created._created as { total: number }
 
       const ours = computeOrderTotals({
-        lines: lines.map((line) => ({ type: line.type, qtyMilli: toQtyMilli(line.qty), price: line.price })),
+        lines: lines.map((line) => ({ type: line.type, qtyMilli: toQtyMilli(line.qty), priceMilli: toPriceMilli(line.price) })),
         vat: useVat ? { rateBp: 800 } : null,
         fees,
       })

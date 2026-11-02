@@ -13,7 +13,18 @@ import { api } from '../api/httpApi'
 import { useAsync } from '../hooks/useAsync'
 import { useAction } from '../hooks/useAction'
 import { useCustomerPrices, usePurchasedReturned } from '../hooks/customerData'
-import { todayISO, fmtMoney, fmtDate, fmtQty, parseQty, uid } from '../lib/format'
+import {
+  todayISO,
+  fmtMoney,
+  fmtDate,
+  fmtQty,
+  formatPriceInput,
+  parsePrice,
+  parseQty,
+  priceToInput,
+  sanitizePriceInput,
+  uid,
+} from '../lib/format'
 import {
   Card,
   Money,
@@ -56,7 +67,7 @@ function ReturnForm({ open, onClose, presetCustomer }) {
     const patch = { productId: p.id }
     if (l?.unitId) {
       const pr = getPrice(p.id, l.unitId)
-      if (pr !== null) patch.price = String(pr)
+      if (pr !== null) patch.price = priceToInput(pr)
     }
     updateLine(lid, patch)
   }
@@ -66,12 +77,12 @@ function ReturnForm({ open, onClose, presetCustomer }) {
     const patch = { unitId }
     if (l?.productId) {
       const pr = getPrice(l.productId, unitId)
-      if (pr !== null) patch.price = String(pr)
+      if (pr !== null) patch.price = priceToInput(pr)
     }
     updateLine(lid, patch)
   }
 
-  const total = lines.reduce((s, l) => s + Math.round(parseQty(l.qty) * (Number(l.price) || 0)), 0)
+  const total = lines.reduce((s, l) => s + Math.round(parseQty(l.qty) * parsePrice(l.price)), 0)
 
   const createUnitFor = (lineId) =>
     run(async () => {
@@ -108,7 +119,7 @@ function ReturnForm({ open, onClose, presetCustomer }) {
           productId: l.productId,
           unitId: l.unitId,
           qty: parseQty(l.qty),
-          price: Number(l.price) || 0,
+          price: parsePrice(l.price),
         })),
       })
       toast.success(`Đã tạo ${rec.code} — trừ ${fmtMoney(rec.total)} đ vào công nợ`)
@@ -132,7 +143,7 @@ function ReturnForm({ open, onClose, presetCustomer }) {
           </Field>
         </div>
 
-        {lines.map((l) => (
+        {lines.map((l, idx) => (
           <div key={l.id} className="rounded-2xl border border-slate-100 bg-slate-50/50 p-3.5">
             <div className="flex items-center gap-2">
               <div className="flex-1">
@@ -202,13 +213,14 @@ function ReturnForm({ open, onClose, presetCustomer }) {
                 className="text-center font-semibold"
               />
               <Input
-                inputMode="numeric"
+                inputMode="decimal"
                 placeholder="Giá lúc bán"
-                value={l.price}
-                onChange={(e) => updateLine(l.id, { price: e.target.value.replace(/[^0-9]/g, '') })}
+                value={formatPriceInput(l.price)}
+                onChange={(e) => updateLine(l.id, { price: sanitizePriceInput(e.target.value) })}
                 className="text-right font-semibold"
               />
             </div>
+            {idx === 0 && <p className="mt-1.5 text-xs text-slate-400">Giá có đồng lẻ thì gõ dấu phẩy, ví dụ 5250,5. Thành tiền làm tròn đến đồng.</p>}
           </div>
         ))}
 

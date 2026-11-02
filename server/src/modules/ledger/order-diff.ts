@@ -1,7 +1,7 @@
 // Builds the human-readable edit history of an order (D-26): the server stores plain Vietnamese
 // sentences, exactly like the web app's `diffOrders`, so the history screen needs no changes.
 
-import { formatDate, formatMoney, formatQty } from '../../shared/format.js'
+import { formatDate, formatMoney, formatPrice, formatQty } from '../../shared/format.js'
 import type { LedgerOrderFee, LedgerOrderLine } from './types.js'
 
 /** The parts of an order that an edit can change. */
@@ -40,6 +40,7 @@ export function diffOrders(
   const { productName, unitName, customerName } = lookups
   const money = lookups.fmtMoney ?? formatMoney
   const qty = lookups.fmtQty ?? formatQty
+  const price = formatPrice
   const date = lookups.fmtDate ?? formatDate
   const changes: string[] = []
 
@@ -89,7 +90,7 @@ export function diffOrders(
 
     if (!previous) {
       const prefix = line.type === 'return' ? 'Thêm dòng trả' : 'Thêm dòng'
-      changes.push(`${prefix} ${label}: ${qty(line.qty)} x ${money(line.price)}`)
+      changes.push(`${prefix} ${label}: ${qty(line.qty)} x ${price(line.price)}`)
       continue
     }
 
@@ -106,7 +107,7 @@ export function diffOrders(
       parts.push(`SL ${qty(previous.qty)} → ${qty(line.qty)}`)
     }
     if (Number(previous.price) !== Number(line.price)) {
-      parts.push(`giá ${money(previous.price)} → ${money(line.price)}`)
+      parts.push(`giá ${price(previous.price)} → ${price(line.price)}`)
     }
     if (parts.length > 0) changes.push(`Dòng ${label}: ${parts.join(', ')}`)
   }
@@ -114,7 +115,7 @@ export function diffOrders(
     if (!newLines.has(line.id)) {
       const prefix = line.type === 'return' ? 'Xóa dòng trả' : 'Xóa dòng'
       changes.push(
-        `${prefix} ${productName(line.productId)}/${unitName(line.unitId)}: ${qty(line.qty)} x ${money(line.price)}`,
+        `${prefix} ${productName(line.productId)}/${unitName(line.unitId)}: ${qty(line.qty)} x ${price(line.price)}`,
       )
     }
   }

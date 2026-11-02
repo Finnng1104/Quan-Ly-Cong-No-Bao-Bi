@@ -1,5 +1,5 @@
 import { forwardRef } from 'react'
-import { fmtMoney, fmtDate, fmtQty } from '../lib/format'
+import { fmtMoney, fmtDate, fmtPrice, fmtQty } from '../lib/format'
 
 /**
  * Phiếu HÓA ĐƠN BÁN LẺ — bố cục theo mẫu Excel:
@@ -82,7 +82,7 @@ const OrderTicket = forwardRef(function OrderTicket(
                   {isRet && <span className="mr-1 text-[10px] font-bold uppercase text-amber-600">[Trả]</span>}
                   {data.products.find((p) => p.id === l.productId)?.name || ''}
                 </td>
-                <td className="py-1.5 px-1 text-right tabular-nums">{fmtMoney(l.price)}</td>
+                <td className="py-1.5 px-1 text-right tabular-nums">{fmtPrice(l.price)}</td>
                 <td className={`py-1.5 pl-1 text-right font-semibold tabular-nums ${isRet ? 'text-amber-700' : ''}`}>
                   {isRet ? `-${fmtMoney(l.amount)}` : fmtMoney(l.amount)}
                 </td>

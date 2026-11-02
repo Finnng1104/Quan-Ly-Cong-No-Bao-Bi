@@ -5,16 +5,16 @@ import { useStore, productName, unitName, customerName } from '../store/useStore
 import { api } from '../api/httpApi'
 import { useAsync } from '../hooks/useAsync'
 import { useAction } from '../hooks/useAction'
-import { fmtMoney } from '../lib/format'
+import { formatPriceInput, parsePrice, priceToInput, sanitizePriceInput } from '../lib/format'
 import { Card, Empty, Button, Input, Modal, Field, Confirm } from '../components/ui'
 import { ErrorCard } from '../components/AsyncState'
 import { PickerModal, PickerButton, Avatar } from '../components/pickers'
 import { useToast } from '../components/Toast'
 
 function PriceRow({ entry, data, onDelete }) {
-  const [v, setV] = useState(String(entry.price))
+  const [v, setV] = useState(priceToInput(entry.price))
   const run = useAction()
-  const dirty = String(entry.price) !== v
+  const dirty = priceToInput(entry.price) !== v
   return (
     <div className="flex items-center gap-2.5 px-4 py-2.5">
       <div className="min-w-0 flex-1">
@@ -25,12 +25,12 @@ function PriceRow({ entry, data, onDelete }) {
       </div>
       <div className="w-32">
         <Input
-          inputMode="numeric"
-          value={v ? fmtMoney(v) : ''}
-          onChange={(e) => setV(e.target.value.replace(/[^0-9]/g, ''))}
+          inputMode="decimal"
+          value={formatPriceInput(v)}
+          onChange={(e) => setV(sanitizePriceInput(e.target.value))}
           onBlur={() => {
             if (dirty && v) {
-              run(() => data.setPrice({ ...entry, customerId: entry.customerId, price: Number(v) }))
+              run(() => data.setPrice({ ...entry, customerId: entry.customerId, price: parsePrice(v) }))
             }
           }}
           onKeyDown={(e) => {
@@ -93,7 +93,7 @@ export default function PriceBookPage() {
         customerId,
         productId: newProd,
         unitId: newUnit,
-        price: Number(newPrice) || 0,
+        price: parsePrice(newPrice),
       })
       toast.success('Đã thêm giá')
       setAddOpen(false)
@@ -217,11 +217,11 @@ export default function PriceBookPage() {
               ))}
             </div>
           </Field>
-          <Field label="Giá (đ)">
+          <Field label="Giá (đ)" hint="Giá có đồng lẻ thì gõ dấu phẩy, ví dụ 5250,5">
             <Input
-              inputMode="numeric"
-              value={newPrice ? fmtMoney(newPrice) : ''}
-              onChange={(e) => setNewPrice(e.target.value.replace(/[^0-9]/g, ''))}
+              inputMode="decimal"
+              value={formatPriceInput(newPrice)}
+              onChange={(e) => setNewPrice(sanitizePriceInput(e.target.value))}
               placeholder="0"
               className="text-right font-bold"
             />

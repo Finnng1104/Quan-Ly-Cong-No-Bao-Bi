@@ -1,7 +1,9 @@
-// Money is always an integer number of VND. Quantities are integers scaled by 1000
-// ("milli-units") so 1.5 is stored as 1500 and never goes through floating point.
+// Amounts (line amounts, totals, debts, payments) are always an integer number of VND. Quantities
+// and unit prices are integers scaled by 1000 ("milli-units") so 1.5 is stored as 1500 and 0.25 đ
+// as 250, and never go through floating point.
 
 export const QTY_SCALE = 1000
+export const PRICE_SCALE = 1000
 const BP_SCALE = 10_000
 
 export class MoneyError extends Error {
@@ -35,17 +37,32 @@ export function fromQtyMilli(milli: number): number {
   return milli / QTY_SCALE
 }
 
+/** Converts a user-facing unit price (e.g. 5250.5) to milli-units (5250500). Rejects more than 3 decimals. */
+export function toPriceMilli(price: number): number {
+  if (!Number.isFinite(price)) throw new MoneyError(`Price must be a finite number, got ${String(price)}`)
+  const scaled = price * PRICE_SCALE
+  const milli = Math.round(scaled)
+  if (Math.abs(scaled - milli) > SCALING_TOLERANCE) {
+    throw new MoneyError(`Price ${String(price)} has more than 3 decimal places`)
+  }
+  return milli
+}
+
+export function fromPriceMilli(milli: number): number {
+  return milli / PRICE_SCALE
+}
+
 /**
  * `qty × price`, rounded half up to a whole VND. BigInt keeps the multiplication exact even when
- * qty_milli × price exceeds 2^53 (e.g. 1.000.000 units × 1.000.000.000 VND).
+ * qtyMilli × priceMilli exceeds 2^53 (e.g. 1.000.000 units × 1.000.000.000 VND).
  */
-export function lineAmount(qtyMilli: number, price: number): number {
+export function lineAmount(qtyMilli: number, priceMilli: number): number {
   assertSafeInteger(qtyMilli, 'qtyMilli')
-  assertSafeInteger(price, 'price')
-  if (qtyMilli < 0 || price < 0) throw new MoneyError('qtyMilli and price must not be negative')
+  assertSafeInteger(priceMilli, 'priceMilli')
+  if (qtyMilli < 0 || priceMilli < 0) throw new MoneyError('qtyMilli and priceMilli must not be negative')
 
-  const scaledScale = BigInt(QTY_SCALE)
-  const amount = (BigInt(qtyMilli) * BigInt(price) + scaledScale / 2n) / scaledScale
+  const scale = BigInt(QTY_SCALE) * BigInt(PRICE_SCALE)
+  const amount = (BigInt(qtyMilli) * BigInt(priceMilli) + scale / 2n) / scale
   if (amount > BigInt(Number.MAX_SAFE_INTEGER)) throw new MoneyError('Line amount is too large')
   return Number(amount)
 }
@@ -80,7 +97,7 @@ export type OrderLineType = 'sell' | 'return'
 export interface PricedLine {
   type: OrderLineType
   qtyMilli: number
-  price: number
+  priceMilli: number
 }
 
 export interface OrderTotalsInput {
@@ -107,7 +124,7 @@ export interface OrderTotals {
 
 /** Single source of truth for what an order is worth. The server never trusts totals sent by clients. */
 export function computeOrderTotals(input: OrderTotalsInput): OrderTotals {
-  const lineAmounts = input.lines.map((line) => lineAmount(line.qtyMilli, line.price))
+  const lineAmounts = input.lines.map((line) => lineAmount(line.qtyMilli, line.priceMilli))
 
   let sellTotal = 0
   let returnTotal = 0

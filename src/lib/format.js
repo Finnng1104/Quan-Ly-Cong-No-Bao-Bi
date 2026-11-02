@@ -7,6 +7,46 @@ export function fmtMoney(n) {
   return moneyFmt.format(Math.round(Number(n)))
 }
 
+// ===== Unit prices: up to 3 decimals, typed with a comma ("5.250,5") =====
+// The form keeps the price as the text the person typed, with "," as the decimal mark and no
+// thousand dots; the dots are only added for display.
+
+const priceFmt = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 3 })
+const PRICE_MAX_DECIMALS = 3
+
+/** Price number -> display text: 5250 -> "5.250", 0.5 -> "0,5". */
+export function fmtPrice(n) {
+  if (n === null || n === undefined || Number.isNaN(Number(n))) return '0'
+  return priceFmt.format(Number(n))
+}
+
+/** Raw text from the input -> clean text: only digits and one comma, at most 3 decimals. */
+export function sanitizePriceInput(text) {
+  const [integerPart, ...rest] = String(text).replace(/\./g, '').replace(/[^0-9,]/g, '').split(',')
+  if (rest.length === 0) return integerPart
+  return `${integerPart},${rest.join('').slice(0, PRICE_MAX_DECIMALS)}`
+}
+
+/** Clean text -> what the input shows: "5250,5" -> "5.250,5". Keeps a trailing comma while typing. */
+export function formatPriceInput(clean) {
+  if (!clean) return ''
+  const [integerPart, decimalPart] = String(clean).split(',')
+  const grouped = integerPart ? priceFmt.format(Number(integerPart)) : '0'
+  return decimalPart === undefined ? grouped : `${grouped},${decimalPart}`
+}
+
+/** Price number from the server -> clean input text: 5250.5 -> "5250,5". */
+export function priceToInput(n) {
+  return n === null || n === undefined || n === '' ? '' : String(n).replace('.', ',')
+}
+
+/** Clean input text -> number: "5250,5" -> 5250.5 */
+export function parsePrice(clean) {
+  if (!clean) return 0
+  const n = Number(String(clean).replace(',', '.'))
+  return Number.isFinite(n) ? n : 0
+}
+
 // Up to the 3 decimals the server stores, without trailing zeros ("5,1", "5,125", "5").
 // Must match formatQty in server/src/shared/format.ts so edit-history text reads the same.
 const qtyFmt = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 3 })

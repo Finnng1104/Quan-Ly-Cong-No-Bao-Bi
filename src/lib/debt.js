@@ -7,7 +7,7 @@
 //  - Ngày là chuỗi 'YYYY-MM-DD', so sánh trực tiếp.
 //  - `seq` là thứ tự phát sinh trong ngày (đơn sau đứng sau đơn trước).
 
-import { dayBeforeISO } from './format'
+import { dayBeforeISO, fmtPrice } from './format'
 
 export const KIND = {
   OPENING: 'opening',
@@ -362,7 +362,7 @@ export function diffOrders(oldOrder, next, lookups) {
     const prev = oldById.get(l.id)
     if (!prev) {
       changes.push(
-        `${l.type === 'return' ? 'Thêm dòng trả' : 'Thêm dòng'} ${name}: ${fmtQty(l.qty)} x ${fmtMoney(l.price)}`,
+        `${l.type === 'return' ? 'Thêm dòng trả' : 'Thêm dòng'} ${name}: ${fmtQty(l.qty)} x ${fmtPrice(l.price)}`,
       )
       continue
     }
@@ -374,13 +374,13 @@ export function diffOrders(oldOrder, next, lookups) {
       parts.push(`hàng ${productName(prev.productId)}/${unitName(prev.unitId)} → ${name}`)
     }
     if (Number(prev.qty) !== Number(l.qty)) parts.push(`SL ${fmtQty(prev.qty)} → ${fmtQty(l.qty)}`)
-    if (Number(prev.price) !== Number(l.price)) parts.push(`giá ${fmtMoney(prev.price)} → ${fmtMoney(l.price)}`)
+    if (Number(prev.price) !== Number(l.price)) parts.push(`giá ${fmtPrice(prev.price)} → ${fmtPrice(l.price)}`)
     if (parts.length) changes.push(`Dòng ${name}: ${parts.join(', ')}`)
   }
   for (const l of oldOrder.lines) {
     if (!newById.has(l.id)) {
       changes.push(
-        `${l.type === 'return' ? 'Xóa dòng trả' : 'Xóa dòng'} ${productName(l.productId)}/${unitName(l.unitId)}: ${fmtQty(l.qty)} x ${fmtMoney(l.price)}`,
+        `${l.type === 'return' ? 'Xóa dòng trả' : 'Xóa dòng'} ${productName(l.productId)}/${unitName(l.unitId)}: ${fmtQty(l.qty)} x ${fmtPrice(l.price)}`,
       )
     }
   }

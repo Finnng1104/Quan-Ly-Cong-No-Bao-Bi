@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Database } from '../../src/db/client.js'
 import type { LedgerData } from '../../src/modules/ledger/types.js'
-import { lineAmount, toQtyMilli } from '../../src/shared/money.js'
+import { lineAmount, toPriceMilli, toQtyMilli } from '../../src/shared/money.js'
 
 const BRANCH = 'main'
 const SEEDED_AT = '2026-09-01T00:00:00.000Z'
@@ -67,7 +67,7 @@ export function loadDataset(
       order.lines.forEach((line, position) => {
         const qtyMilli = toQtyMilli(line.qty)
         db.prepare(
-          `INSERT INTO order_lines (id, order_id, position, type, product_id, unit_id, qty_milli, price, amount)
+          `INSERT INTO order_lines (id, order_id, position, type, product_id, unit_id, qty_milli, price_milli, amount)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           line.id,
@@ -77,8 +77,8 @@ export function loadDataset(
           line.productId,
           line.unitId,
           qtyMilli,
-          line.price,
-          lineAmount(qtyMilli, line.price),
+          toPriceMilli(line.price),
+          lineAmount(qtyMilli, toPriceMilli(line.price)),
         )
       })
       ;(order.fees ?? []).forEach((fee, position) => {
@@ -110,9 +110,9 @@ export function loadDataset(
       goodsReturn.lines.forEach((line, position) => {
         const qtyMilli = toQtyMilli(line.qty)
         db.prepare(
-          `INSERT INTO return_lines (id, return_id, position, product_id, unit_id, qty_milli, price, amount)
+          `INSERT INTO return_lines (id, return_id, position, product_id, unit_id, qty_milli, price_milli, amount)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(randomUUID(), goodsReturn.id, position, line.productId, line.unitId, qtyMilli, line.price ?? 0, lineAmount(qtyMilli, line.price ?? 0))
+        ).run(randomUUID(), goodsReturn.id, position, line.productId, line.unitId, qtyMilli, toPriceMilli(line.price ?? 0), lineAmount(qtyMilli, toPriceMilli(line.price ?? 0)))
       })
     })
 

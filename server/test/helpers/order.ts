@@ -1,4 +1,4 @@
-import { computeOrderTotals, toQtyMilli, type OrderTotals } from '../../src/shared/money.js'
+import { computeOrderTotals, toPriceMilli, toQtyMilli, type OrderTotals } from '../../src/shared/money.js'
 
 export interface OrderLineSpec {
   type?: 'sell' | 'return'
@@ -21,7 +21,7 @@ export function totalsFor(spec: OrderSpec): OrderTotals {
     lines: spec.lines.map((line) => ({
       type: line.type ?? 'sell',
       qtyMilli: toQtyMilli(line.qty),
-      price: line.price,
+      priceMilli: toPriceMilli(line.price),
     })),
     vat:
       spec.vatPercent === undefined
