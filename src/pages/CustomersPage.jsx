@@ -1,17 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Search, UserPlus, ChevronRight, ArrowDownWideNarrow, CalendarDays, Download } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { api } from '../api/httpApi'
-import { useAsync } from '../hooks/useAsync'
+import { usePagedList } from '../hooks/usePagedList'
 import { useAction } from '../hooks/useAction'
 import { todayISO, fmtMoney, fmtDate, toCsv, downloadText } from '../lib/format'
 import { Card, Money, Empty, Modal, Button, Field, Input, Textarea } from '../components/ui'
-import { ErrorCard } from '../components/AsyncState'
+import { ErrorCard, LoadingCard } from '../components/AsyncState'
 import { Avatar } from '../components/pickers'
 import { useToast } from '../components/Toast'
 
 const SEARCH_DEBOUNCE_MS = 250
+const CUSTOMERS_PAGE_SIZE = 50
+// Start loading the next page a little before the end of the list is reached, so scrolling never stalls.
+const LOAD_MORE_MARGIN = '400px'
 
 export function CustomerForm({ open, onClose, initial }) {
   const addCustomer = useStore((s) => s.addCustomer)
@@ -92,7 +95,6 @@ export default function CustomersPage() {
   const [date, setDate] = useState(todayISO())
   const [sortDesc, setSortDesc] = useState(true)
   const [formOpen, setFormOpen] = useState(false)
-  const [limit, setLimit] = useState(30)
   const [debouncedQ, setDebouncedQ] = useState('')
   const dataVersion = useStore((s) => s.dataVersion)
   const toast = useToast()
@@ -104,21 +106,38 @@ export default function CustomersPage() {
     return () => clearTimeout(timer)
   }, [q])
 
-  const { data: page, error, reload } = useAsync(
-    () =>
-      api.customers.list({
-        q: debouncedQ,
-        sort: sortDesc ? 'debt_desc' : 'debt_asc',
-        asOf: date,
-        limit,
-        offset: 0,
-      }),
-    [debouncedQ, sortDesc, date, limit, dataVersion],
+  const {
+    items: shown,
+    total: matchCount,
+    summary,
+    loading,
+    loadingMore,
+    error,
+    hasMore,
+    loadMore,
+    reload,
+  } = usePagedList(
+    ({ offset, limit }) =>
+      api.customers.list({ q: debouncedQ, sort: sortDesc ? 'debt_desc' : 'debt_asc', asOf: date, limit, offset }),
+    { pageSize: CUSTOMERS_PAGE_SIZE, resetDeps: [debouncedQ, sortDesc, date], refreshDeps: [dataVersion] },
   )
+  const totalDebt = summary?.totalDebt ?? 0
 
-  const shown = page?.items ?? []
-  const matchCount = page?.total ?? 0
-  const totalDebt = page?.summary.totalDebt ?? 0
+  // Infinite scroll: an invisible marker after the list asks for the next page when it comes into view.
+  // After an error we stop auto-loading and show a retry button instead, otherwise a failing request would loop.
+  const endOfListRef = useRef(null)
+  useEffect(() => {
+    const endOfList = endOfListRef.current
+    if (!endOfList || !hasMore || error || loading || loadingMore) return undefined
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) loadMore()
+      },
+      { rootMargin: LOAD_MORE_MARGIN },
+    )
+    observer.observe(endOfList)
+    return () => observer.disconnect()
+  }, [hasMore, error, loading, loadingMore, loadMore])
 
   // Xuất danh sách công nợ cuối của khách hàng (CSV — mở bằng Excel)
   const exportDebt = () => run(async () => {
@@ -198,10 +217,7 @@ export default function CustomersPage() {
         <Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
         <Input
           value={q}
-          onChange={(e) => {
-            setQ(e.target.value)
-            setLimit(30)
-          }}
+          onChange={(e) => setQ(e.target.value)}
           placeholder="Tìm theo tên hoặc SĐT..."
           className="pl-10"
         />
@@ -220,7 +236,7 @@ export default function CustomersPage() {
         </button>
       </div>
 
-      {error && !page ? (
+      {error && shown.length === 0 ? (
         <ErrorCard error={error} onRetry={reload} />
       ) : shown.length === 0 ? (
         <Card>
@@ -262,10 +278,16 @@ export default function CustomersPage() {
         </Card>
       )}
 
-      {matchCount > shown.length && (
-        <Button variant="outline" className="w-full" onClick={() => setLimit((l) => l + 30)}>
-          Xem thêm ({matchCount - shown.length} khách)
-        </Button>
+      {hasMore && (
+        <div ref={endOfListRef}>
+          {error ? (
+            <Button variant="outline" className="w-full" onClick={loadMore}>
+              Không tải được thêm — bấm để thử lại
+            </Button>
+          ) : (
+            loadingMore && <LoadingCard />
+          )}
+        </div>
       )}
 
       <CustomerForm open={formOpen} onClose={() => setFormOpen(false)} />
