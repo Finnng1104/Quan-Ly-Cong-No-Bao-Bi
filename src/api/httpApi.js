@@ -42,9 +42,19 @@ export const api = {
 
   customers: {
     /** One page: { items, total, summary }. Items carry `debt`, `act` (that day's activity), `priceCount`. */
-    list: async ({ q, sort, asOf, limit, offset } = {}) => {
-      const result = await request('GET', '/customers', { query: { q, sort, asOf, limit, offset } })
-      return { ...result, items: result.items.map(toCustomerListItem) }
+    list: async ({ q, sort, asOf, limit, offset = 0 } = {}) => {
+      // The server rejects a page larger than PAGE_SIZE, but "Xem thêm" keeps growing `limit`,
+      // so a long list is fetched as several consecutive pages and stitched together.
+      const items = []
+      let page
+      do {
+        page = await request('GET', '/customers', {
+          query: { q, sort, asOf, limit: Math.min(PAGE_SIZE, limit - items.length), offset: offset + items.length },
+        })
+        items.push(...page.items)
+        // An empty page means the list ended early (e.g. rows deleted meanwhile).
+      } while (items.length < limit && items.length < page.total - offset && page.items.length > 0)
+      return { ...page, items: items.map(toCustomerListItem) }
     },
     /** Every customer, fetched page by page. Used by pickers, which filter locally. */
     listAll: async ({ asOf } = {}) => {
