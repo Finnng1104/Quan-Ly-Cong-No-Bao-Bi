@@ -19,6 +19,7 @@ export default function PaymentsPage() {
   const [note, setNote] = useState('')
   const [custPicker, setCustPicker] = useState(false)
   const [delId, setDelId] = useState(null)
+  const [editingId, setEditingId] = useState(null)
   const data = useStore()
   const toast = useToast()
   const run = useAction()
@@ -39,12 +40,34 @@ export default function PaymentsPage() {
   const save = () => {
     if (!customerId) return toast.error('Vui lòng chọn khách')
     if (!Number(amount) || Number(amount) <= 0) return toast.error('Nhập số tiền thu')
+    const payload = { customerId, date, amount: Number(amount), note }
     return run(async () => {
-      const rec = await data.addPayment({ customerId, date, amount: Number(amount), note })
-      toast.success(`Đã thu ${fmtMoney(rec.amount)} đ — trừ vào công nợ chung`)
-      setAmount('')
-      setNote('')
+      if (editingId) {
+        const rec = await data.editPayment(editingId, payload)
+        toast.success(`Đã sửa ${rec.code} — ${fmtMoney(rec.amount)} đ`)
+      } else {
+        const rec = await data.addPayment(payload)
+        toast.success(`Đã thu ${fmtMoney(rec.amount)} đ — trừ vào công nợ chung`)
+      }
+      resetForm()
     })
+  }
+
+  const resetForm = () => {
+    setEditingId(null)
+    setAmount('')
+    setNote('')
+    setDate(todayISO())
+  }
+
+  const startEditing = (payment) => {
+    setEditingId(payment.id)
+    setCustomerId(payment.customerId)
+    setDate(payment.date)
+    setAmount(String(payment.amount))
+    setNote(payment.note)
+    // The form sits above the history list, so bring it into view.
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   return (
@@ -58,6 +81,14 @@ export default function PaymentsPage() {
 
       {/* form thu nhanh */}
       <Card className="space-y-3.5 p-4">
+        {editingId && (
+          <div className="flex items-center justify-between rounded-xl bg-sky-50 px-3.5 py-2.5 text-[13px] font-semibold text-sky-700">
+            <span>Đang sửa {payments.find((p) => p.id === editingId)?.code ?? 'phiếu thu'}</span>
+            <button onClick={resetForm} className="font-bold active:opacity-60">
+              Hủy
+            </button>
+          </div>
+        )}
         <div className="grid grid-cols-[1fr_auto] gap-3">
           <Field label="Khách hàng *">
             <PickerButton onClick={() => setCustPicker(true)} placeholder="Chọn khách..." icon={User}>
@@ -110,7 +141,7 @@ export default function PaymentsPage() {
         </Field>
 
         <Button size="lg" variant="success" icon={Save} className="w-full" onClick={save}>
-          Lưu phiếu thu
+          {editingId ? 'Lưu thay đổi' : 'Lưu phiếu thu'}
         </Button>
       </Card>
 
@@ -144,12 +175,14 @@ export default function PaymentsPage() {
               </div>
               <div className="text-right">
                 <Money value={p.amount} className="text-[14px] text-emerald-600" sign />
-                <button
-                  onClick={() => setDelId(p.id)}
-                  className="mt-0.5 block w-full text-right text-[11px] font-semibold text-slate-300 hover:text-rose-500"
-                >
-                  Xóa
-                </button>
+                <div className="mt-0.5 flex justify-end gap-3 text-[11px] font-semibold text-slate-400">
+                  <button onClick={() => startEditing(p)} className="active:text-emerald-600 hover:text-emerald-600">
+                    Sửa
+                  </button>
+                  <button onClick={() => setDelId(p.id)} className="active:text-rose-500 hover:text-rose-500">
+                    Xóa
+                  </button>
+                </div>
               </div>
             </div>
           ))}

@@ -180,12 +180,22 @@ export const useStore = create(
           bump()
           return record
         },
+        editReturn: async (id, payload) => {
+          const record = await api.returns.update(id, payload)
+          bump()
+          return record
+        },
         removeReturn: async (id) => {
           await api.returns.remove(id)
           bump()
         },
         addPayment: async (payload) => {
           const record = await api.payments.create(payload)
+          bump()
+          return record
+        },
+        editPayment: async (id, payload) => {
+          const record = await api.payments.update(id, payload)
           bump()
           return record
         },

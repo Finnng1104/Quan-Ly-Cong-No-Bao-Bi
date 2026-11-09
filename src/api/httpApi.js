@@ -122,6 +122,7 @@ export const api = {
     list: ({ customerId, limit, offset } = {}) =>
       request('GET', '/returns', { query: { customerId, limit, offset } }),
     create: (payload) => request('POST', '/returns', { body: payload }),
+    update: (id, payload) => request('PUT', `/returns/${id}`, { body: payload }),
     remove: (id) => request('DELETE', `/returns/${id}`),
   },
 
@@ -129,6 +130,7 @@ export const api = {
     list: ({ customerId, limit, offset } = {}) =>
       request('GET', '/payments', { query: { customerId, limit, offset } }),
     create: (payload) => request('POST', '/payments', { body: payload }),
+    update: (id, payload) => request('PUT', `/payments/${id}`, { body: payload }),
     remove: (id) => request('DELETE', `/payments/${id}`),
   },
 

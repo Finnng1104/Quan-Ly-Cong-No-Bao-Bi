@@ -44,14 +44,24 @@ const PAGE_SIZE = 60
 
 const newLine = () => ({ id: uid('l'), productId: '', unitId: '', qty: '', price: '' })
 
-function ReturnForm({ open, onClose, presetCustomer }) {
+function ReturnForm({ open, onClose, presetCustomer, editing = null }) {
   const data = useStore()
   const toast = useToast()
   const run = useAction()
-  const [customerId, setCustomerId] = useState(presetCustomer || '')
-  const [date, setDate] = useState(todayISO())
-  const [reason, setReason] = useState('')
-  const [lines, setLines] = useState([newLine()])
+  const [customerId, setCustomerId] = useState(editing?.customerId || presetCustomer || '')
+  const [date, setDate] = useState(editing?.date || todayISO())
+  const [reason, setReason] = useState(editing?.reason || '')
+  const [lines, setLines] = useState(
+    editing
+      ? editing.lines.map((l) => ({
+          id: uid('l'),
+          productId: l.productId,
+          unitId: l.unitId,
+          qty: String(l.qty),
+          price: priceToInput(l.price),
+        }))
+      : [newLine()],
+  )
   const [custPicker, setCustPicker] = useState(false)
   const [addingUnitFor, setAddingUnitFor] = useState(null)
   const [newUnitName, setNewUnitName] = useState('')
@@ -110,25 +120,31 @@ function ReturnForm({ open, onClose, presetCustomer }) {
     if (!customerId) return toast.error('Vui lòng chọn khách')
     const valid = lines.filter((l) => l.productId && l.unitId && parseQty(l.qty) > 0)
     if (valid.length === 0) return toast.error('Cần ít nhất 1 dòng hàng trả')
+    const payload = {
+      customerId,
+      date,
+      reason,
+      lines: valid.map((l) => ({
+        productId: l.productId,
+        unitId: l.unitId,
+        qty: parseQty(l.qty),
+        price: parsePrice(l.price),
+      })),
+    }
     return run(async () => {
-      const rec = await data.addReturn({
-        customerId,
-        date,
-        reason,
-        lines: valid.map((l) => ({
-          productId: l.productId,
-          unitId: l.unitId,
-          qty: parseQty(l.qty),
-          price: parsePrice(l.price),
-        })),
-      })
-      toast.success(`Đã tạo ${rec.code} — trừ ${fmtMoney(rec.total)} đ vào công nợ`)
+      if (editing) {
+        const rec = await data.editReturn(editing.id, payload)
+        toast.success(`Đã sửa ${rec.code} — trừ ${fmtMoney(rec.total)} đ vào công nợ`)
+      } else {
+        const rec = await data.addReturn(payload)
+        toast.success(`Đã tạo ${rec.code} — trừ ${fmtMoney(rec.total)} đ vào công nợ`)
+      }
       onClose()
     })
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Phiếu hàng trả" wide>
+    <Modal open={open} onClose={onClose} title={editing ? `Sửa ${editing.code}` : 'Phiếu hàng trả'} wide>
       <div className="space-y-4">
         <div className="grid grid-cols-[1fr_auto] gap-3">
           <Field label="Khách hàng *">
@@ -250,7 +266,7 @@ function ReturnForm({ open, onClose, presetCustomer }) {
           <span className="text-lg font-extrabold tabular-nums text-amber-600">{fmtMoney(total)} đ</span>
         </div>
         <Button size="lg" variant="amber" icon={Save} className="w-full" onClick={save}>
-          Lưu phiếu trả
+          {editing ? 'Lưu thay đổi' : 'Lưu phiếu trả'}
         </Button>
       </div>
 
@@ -277,6 +293,7 @@ export default function ReturnsPage() {
   const [sp] = useSearchParams()
   const [formOpen, setFormOpen] = useState(!!sp.get('khach'))
   const [delId, setDelId] = useState(null)
+  const [editing, setEditing] = useState(null)
   const [limit, setLimit] = useState(PAGE_SIZE)
   const data = useStore()
   const toast = useToast()
@@ -296,7 +313,14 @@ export default function ReturnsPage() {
           <h1 className="text-xl font-bold text-slate-800">Hàng trả</h1>
           <p className="text-[12px] text-slate-400">Hàng trả chỉ trừ công nợ — không có kho</p>
         </div>
-        <Button icon={Plus} variant="amber" onClick={() => setFormOpen(true)}>
+        <Button
+          icon={Plus}
+          variant="amber"
+          onClick={() => {
+            setEditing(null)
+            setFormOpen(true)
+          }}
+        >
           Tạo phiếu
         </Button>
       </div>
@@ -328,12 +352,20 @@ export default function ReturnsPage() {
               </div>
               <div className="text-right">
                 <Money value={r.total} className="text-[14px] text-amber-600" />
-                <button
-                  onClick={() => setDelId(r.id)}
-                  className="mt-0.5 text-[11px] font-semibold text-slate-300 hover:text-rose-500"
-                >
-                  Xóa
-                </button>
+                <div className="mt-0.5 flex justify-end gap-3 text-[11px] font-semibold text-slate-400">
+                  <button
+                    onClick={() => {
+                      setEditing(r)
+                      setFormOpen(true)
+                    }}
+                    className="active:text-amber-600 hover:text-amber-600"
+                  >
+                    Sửa
+                  </button>
+                  <button onClick={() => setDelId(r.id)} className="active:text-rose-500 hover:text-rose-500">
+                    Xóa
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -346,11 +378,18 @@ export default function ReturnsPage() {
         </Button>
       )}
 
-      <ReturnForm
-        open={formOpen}
-        onClose={() => setFormOpen(false)}
-        presetCustomer={sp.get('khach')}
-      />
+      {/* Mounted only while open so each use starts from fresh state (blank, or the record being edited). */}
+      {formOpen && (
+        <ReturnForm
+          open
+          editing={editing}
+          onClose={() => {
+            setFormOpen(false)
+            setEditing(null)
+          }}
+          presetCustomer={sp.get('khach')}
+        />
+      )}
 
       <Confirm
         open={!!delId}

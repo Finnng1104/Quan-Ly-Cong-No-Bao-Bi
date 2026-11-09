@@ -106,6 +106,24 @@ export function registerPaymentRoutes(app: FastifyInstance, ctx: AppContext): vo
     return toDto(ctx.db.prepare('SELECT * FROM payments WHERE id = ?').get(id) as PaymentRow)
   })
 
+  // Editing keeps the code, sequence number and creation time so the ledger order stays stable.
+  app.put('/api/payments/:id', async (request) => {
+    const { branchId } = authorize(request, 'payments:write')
+    const { id } = request.params as { id: string }
+    const existing = ctx.db
+      .prepare('SELECT deleted_at FROM payments WHERE id = ? AND branch_id = ?')
+      .get(id, branchId) as { deleted_at: string | null } | undefined
+    if (!existing || existing.deleted_at) throw new AppError('NOT_FOUND', 'Không tìm thấy phiếu thu')
+
+    const body = parseInput(createSchema, request.body)
+    requireCustomer(ctx.db, branchId, body.customerId)
+
+    ctx.db
+      .prepare('UPDATE payments SET customer_id = ?, date = ?, amount = ?, note = ? WHERE id = ? AND branch_id = ?')
+      .run(body.customerId, body.date, body.amount, body.note, id, branchId)
+    return toDto(ctx.db.prepare('SELECT * FROM payments WHERE id = ?').get(id) as PaymentRow)
+  })
+
   app.delete('/api/payments/:id', async (request) => {
     const { branchId } = authorize(request, 'payments:write')
     const { id } = request.params as { id: string }

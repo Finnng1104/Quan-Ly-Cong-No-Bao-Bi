@@ -15,7 +15,7 @@ import {
   qtySchema,
 } from '../../shared/validation.js'
 import { requireCustomer } from '../customers/service.js'
-import { validateLineItem } from '../documents/line-validation.js'
+import { validateLineItem, type ReusableItems } from '../documents/line-validation.js'
 
 interface ReturnRow {
   id: string
@@ -93,6 +93,20 @@ export function registerReturnRoutes(app: FastifyInstance, ctx: AppContext): voi
     return row
   }
 
+  const prepareLines = (branchId: string, lines: z.infer<typeof lineSchema>[], reusable: ReusableItems | null) =>
+    lines.map((line, index) => {
+      const qtyMilli = validateLineItem(ctx, branchId, line, `lines[${index}]`, reusable)
+      const priceMilli = toPriceMilli(line.price)
+      let amount: number
+      try {
+        amount = lineAmount(qtyMilli, priceMilli)
+      } catch (error) {
+        if (error instanceof MoneyError) throw new AppError('VALIDATION_ERROR', 'Giá trị phiếu quá lớn')
+        throw error
+      }
+      return { id: randomUUID(), ...line, qtyMilli, priceMilli, amount }
+    })
+
   app.get('/api/returns', async (request) => {
     const { branchId } = authorize(request, 'returns:read')
     const query = parseInput(listSchema, request.query)
@@ -122,18 +136,7 @@ export function registerReturnRoutes(app: FastifyInstance, ctx: AppContext): voi
     const body = parseInput(createSchema, request.body)
     requireCustomer(ctx.db, branchId, body.customerId)
 
-    const prepared = body.lines.map((line, index) => {
-      const qtyMilli = validateLineItem(ctx, branchId, line, `lines[${index}]`, null)
-      const priceMilli = toPriceMilli(line.price)
-      let amount: number
-      try {
-        amount = lineAmount(qtyMilli, priceMilli)
-      } catch (error) {
-        if (error instanceof MoneyError) throw new AppError('VALIDATION_ERROR', 'Giá trị phiếu quá lớn')
-        throw error
-      }
-      return { id: randomUUID(), ...line, qtyMilli, priceMilli, amount }
-    })
+    const prepared = prepareLines(branchId, body.lines, null)
     const total = prepared.reduce((sum, line) => sum + line.amount, 0)
 
     const id = randomUUID()
@@ -159,6 +162,47 @@ export function registerReturnRoutes(app: FastifyInstance, ctx: AppContext): voi
     run.immediate()
 
     reply.status(201)
+    return toDto(requireRow(branchId, id))
+  })
+
+  // Editing keeps the code, sequence number and creation time so the ledger order stays stable.
+  app.put('/api/returns/:id', async (request) => {
+    const { branchId } = authorize(request, 'returns:write')
+    const { id } = request.params as { id: string }
+    const existing = requireRow(branchId, id)
+    if (existing.deleted_at) throw new AppError('NOT_FOUND', 'Không tìm thấy phiếu trả hàng')
+
+    const body = parseInput(createSchema, request.body)
+    requireCustomer(ctx.db, branchId, body.customerId)
+
+    // A product or unit deleted since the return was created may still be kept on it.
+    const previousLines = ctx.db
+      .prepare('SELECT product_id, unit_id FROM return_lines WHERE return_id = ?')
+      .all(id) as { product_id: string; unit_id: string }[]
+    const reusable: ReusableItems = {
+      productIds: new Set(previousLines.map((line) => line.product_id)),
+      unitIds: new Set(previousLines.map((line) => line.unit_id)),
+    }
+
+    const prepared = prepareLines(branchId, body.lines, reusable)
+    const total = prepared.reduce((sum, line) => sum + line.amount, 0)
+
+    ctx.db
+      .transaction(() => {
+        ctx.db
+          .prepare('UPDATE returns SET customer_id = ?, date = ?, total = ?, reason = ? WHERE id = ? AND branch_id = ?')
+          .run(body.customerId, body.date, total, body.reason, id, branchId)
+        ctx.db.prepare('DELETE FROM return_lines WHERE return_id = ?').run(id)
+        const insertLine = ctx.db.prepare(
+          `INSERT INTO return_lines (id, return_id, position, product_id, unit_id, qty_milli, price_milli, amount)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        prepared.forEach((line, position) => {
+          insertLine.run(line.id, id, position, line.productId, line.unitId, line.qtyMilli, line.priceMilli, line.amount)
+        })
+      })
+      .immediate()
+
     return toDto(requireRow(branchId, id))
   })
 

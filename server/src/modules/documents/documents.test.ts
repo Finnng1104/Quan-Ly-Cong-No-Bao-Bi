@@ -64,6 +64,32 @@ describe('returns, payments and adjustments', () => {
       expect(await debtOn('2026-10-11')).toBe(59356) // the payment no longer counts
       expect((await t.api.delete('/api/payments/nope')).status).toBe(404)
     })
+
+    it('can be edited, keeping their code, and the debt follows', async () => {
+      const created = await t.api.post('/api/payments', { customerId: w.customerId, date: '2026-10-09', amount: 30000 })
+
+      const edited = await t.api.put(`/api/payments/${created.body.id}`, {
+        customerId: w.customerId,
+        date: '2026-10-10',
+        amount: 10000,
+        note: 'Sửa lại',
+      })
+
+      expect(edited.status).toBe(200)
+      expect(edited.body).toMatchObject({ code: 'TT-0001', amount: 10000, date: '2026-10-10', note: 'Sửa lại' })
+      expect(await debtOn('2026-10-09')).toBe(59356)
+      expect(await debtOn('2026-10-10')).toBe(59356 - 10000)
+    })
+
+    it('cannot be edited when unknown, deleted or given a zero amount', async () => {
+      const created = await t.api.post('/api/payments', { customerId: w.customerId, date: '2026-10-09', amount: 1000 })
+      const base = { customerId: w.customerId, date: '2026-10-09', amount: 1000 }
+
+      expect((await t.api.put('/api/payments/nope', base)).status).toBe(404)
+      expect((await t.api.put(`/api/payments/${created.body.id}`, { ...base, amount: 0 })).status).toBe(400)
+      await t.api.delete(`/api/payments/${created.body.id}`)
+      expect((await t.api.put(`/api/payments/${created.body.id}`, base)).status).toBe(404)
+    })
   })
 
   describe('returns', () => {
@@ -98,6 +124,29 @@ describe('returns, payments and adjustments', () => {
         (await t.api.post('/api/returns', body({ lines: [{ productId: w.productId, unitId: w.unitId, qty: 0, price: 1 }] })))
           .status,
       ).toBe(400)
+    })
+
+    it('can be edited, keeping their code, and the total is recomputed', async () => {
+      const created = await t.api.post('/api/returns', body())
+
+      const edited = await t.api.put(
+        `/api/returns/${created.body.id}`,
+        body({ lines: [{ productId: w.productId, unitId: w.unitId, qty: 2, price: 600 }], reason: 'Đổi ý' }),
+      )
+
+      expect(edited.status).toBe(200)
+      expect(edited.body).toMatchObject({ code: 'TH-0001', total: 1200, reason: 'Đổi ý' })
+      expect(edited.body.lines).toHaveLength(1)
+      expect(await debtOn('2026-10-09')).toBe(59356 - 1200)
+    })
+
+    it('cannot be edited when unknown, deleted or left without lines', async () => {
+      const created = await t.api.post('/api/returns', body())
+
+      expect((await t.api.put('/api/returns/nope', body())).status).toBe(404)
+      expect((await t.api.put(`/api/returns/${created.body.id}`, body({ lines: [] }))).status).toBe(400)
+      await t.api.delete(`/api/returns/${created.body.id}`)
+      expect((await t.api.put(`/api/returns/${created.body.id}`, body())).status).toBe(404)
     })
 
     it('are listed and soft deleted', async () => {
