@@ -5,7 +5,7 @@ import { useStore, customerName } from '../store/useStore'
 import { api } from '../api/httpApi'
 import { useAsync } from '../hooks/useAsync'
 import { useAction } from '../hooks/useAction'
-import { todayISO, fmtMoney, fmtDate } from '../lib/format'
+import { todayISO, fmtMoney, fmtDate, dateFromSearchParams } from '../lib/format'
 import { Card, Money, Badge, Empty, Button, Field, Input, Confirm } from '../components/ui'
 import { ErrorCard } from '../components/AsyncState'
 import { PickerModal, PickerButton, Avatar } from '../components/pickers'
@@ -20,6 +20,7 @@ export default function PaymentsPage() {
   const [custPicker, setCustPicker] = useState(false)
   const [delId, setDelId] = useState(null)
   const [editingId, setEditingId] = useState(null)
+  const [filterDate, setFilterDate] = useState(() => dateFromSearchParams(sp))
   const data = useStore()
   const toast = useToast()
   const run = useAction()
@@ -32,8 +33,8 @@ export default function PaymentsPage() {
   const debt = customerId && customerInfo?.id === customerId ? customerInfo.balance : null
 
   const { data: paymentPage, error, reload } = useAsync(
-    () => api.payments.list({ limit: 60 }),
-    [data.dataVersion],
+    () => api.payments.list({ date: filterDate, limit: 60 }),
+    [filterDate, data.dataVersion],
   )
   const payments = paymentPage?.items ?? []
 
@@ -151,11 +152,20 @@ export default function PaymentsPage() {
         <Badge tone="emerald">{payments.length} phiếu</Badge>
       </div>
 
+      {filterDate && (
+        <div className="flex items-center justify-between rounded-xl bg-emerald-50 px-3.5 py-2.5 text-[13px] font-semibold text-emerald-700">
+          <span>Đang xem ngày {fmtDate(filterDate)}</span>
+          <button onClick={() => setFilterDate('')} className="font-bold active:opacity-60">
+            Xem tất cả
+          </button>
+        </div>
+      )}
+
       {error && !paymentPage ? (
         <ErrorCard error={error} onRetry={reload} />
       ) : payments.length === 0 ? (
         <Card>
-          <Empty icon={HandCoins} title="Chưa có phiếu thu nào" />
+          <Empty icon={HandCoins} title={filterDate ? 'Không có phiếu thu trong ngày này' : 'Chưa có phiếu thu nào'} />
         </Card>
       ) : (
         <Card className="divide-y divide-slate-50 overflow-hidden">

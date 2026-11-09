@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { CalendarDays, History, ChevronRight, User, PlusCircle, Trash2 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { api } from '../api/httpApi'
 import { useAsync } from '../hooks/useAsync'
-import { fmtMoney, fmtDate, fmtDateTime, fmtQty } from '../lib/format'
+import { fmtMoney, fmtDate, fmtDateTime, fmtQty, dateFromSearchParams } from '../lib/format'
 import { Card, Money, Badge, Empty, Button } from '../components/ui'
 import { ErrorCard } from '../components/AsyncState'
 import { PickerModal, PickerButton, Avatar } from '../components/pickers'
@@ -14,7 +14,8 @@ const PAGE_SIZE = 50
 
 export default function OrdersPage() {
   const navigate = useNavigate()
-  const [date, setDate] = useState('')
+  const [searchParams] = useSearchParams()
+  const [date, setDate] = useState(() => dateFromSearchParams(searchParams))
   const [customerId, setCustomerId] = useState('')
   const [showDeleted, setShowDeleted] = useState(false)
   const [custPicker, setCustPicker] = useState(false)

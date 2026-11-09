@@ -73,7 +73,7 @@ export default function DashboardPage() {
           </div>
         </div>
         <div className="grid grid-cols-3 divide-x divide-slate-100">
-          <div className="p-3.5 text-center">
+          <Link to={`/don-hang?ngay=${date}`} className="block p-3.5 text-center transition-colors active:bg-slate-100 hover:bg-slate-50">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
               Đơn hôm nay
             </p>
@@ -81,8 +81,8 @@ export default function DashboardPage() {
               {fmtMoney(day.orders)}<span className="text-[11px] text-slate-400">đ</span>
             </p>
             <p className="text-[11px] text-slate-400">{day.orderCount} đơn</p>
-          </div>
-          <div className="p-3.5 text-center">
+          </Link>
+          <Link to={`/thu-tien?ngay=${date}`} className="block p-3.5 text-center transition-colors active:bg-slate-100 hover:bg-slate-50">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
               Thu hôm nay
             </p>
@@ -90,8 +90,8 @@ export default function DashboardPage() {
               {fmtMoney(day.payments)}<span className="text-[11px] text-emerald-400">đ</span>
             </p>
             <p className="text-[11px] text-slate-400">{day.paymentCount} lần</p>
-          </div>
-          <div className="p-3.5 text-center">
+          </Link>
+          <Link to={`/hang-tra?ngay=${date}`} className="block p-3.5 text-center transition-colors active:bg-slate-100 hover:bg-slate-50">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
               Trả hàng
             </p>
@@ -99,7 +99,7 @@ export default function DashboardPage() {
               {fmtMoney(day.returns)}<span className="text-[11px] text-amber-400">đ</span>
             </p>
             <p className="text-[11px] text-slate-400">trong ngày</p>
-          </div>
+          </Link>
         </div>
       </Card>
 

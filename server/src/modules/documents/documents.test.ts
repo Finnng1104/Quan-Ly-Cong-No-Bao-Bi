@@ -65,6 +65,16 @@ describe('returns, payments and adjustments', () => {
       expect((await t.api.delete('/api/payments/nope')).status).toBe(404)
     })
 
+    it('can be listed for a single day', async () => {
+      await t.api.post('/api/payments', { customerId: w.customerId, date: '2026-10-08', amount: 1000 })
+      await t.api.post('/api/payments', { customerId: w.customerId, date: '2026-10-09', amount: 2000 })
+
+      const day = await t.api.get('/api/payments?date=2026-10-09')
+
+      expect(day.body.items.map((p: { amount: number }) => p.amount)).toEqual([2000])
+      expect((await t.api.get('/api/payments?date=nope')).status).toBe(400)
+    })
+
     it('can be edited, keeping their code, and the debt follows', async () => {
       const created = await t.api.post('/api/payments', { customerId: w.customerId, date: '2026-10-09', amount: 30000 })
 
@@ -124,6 +134,16 @@ describe('returns, payments and adjustments', () => {
         (await t.api.post('/api/returns', body({ lines: [{ productId: w.productId, unitId: w.unitId, qty: 0, price: 1 }] })))
           .status,
       ).toBe(400)
+    })
+
+    it('can be listed for a single day', async () => {
+      await t.api.post('/api/returns', body({ date: '2026-10-08' }))
+      await t.api.post('/api/returns', body({ date: '2026-10-09' }))
+
+      const day = await t.api.get('/api/returns?date=2026-10-09')
+
+      expect(day.body.total).toBe(1)
+      expect(day.body.items[0].date).toBe('2026-10-09')
     })
 
     it('can be edited, keeping their code, and the total is recomputed', async () => {

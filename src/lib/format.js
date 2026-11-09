@@ -148,3 +148,9 @@ export function toCsv(rows) {
   }
   return '﻿' + rows.map((r) => r.map(esc).join(';')).join('\r\n')
 }
+
+/** Reads a `?ngay=YYYY-MM-DD` filter from the URL; anything else counts as "no filter". */
+export function dateFromSearchParams(searchParams) {
+  const value = searchParams.get('ngay') ?? ''
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : ''
+}

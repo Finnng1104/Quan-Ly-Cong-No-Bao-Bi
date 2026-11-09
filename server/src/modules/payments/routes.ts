@@ -35,6 +35,7 @@ const createSchema = z.object({
 
 const listSchema = paginationSchema.extend({
   customerId: idSchema.optional(),
+  date: isoDateSchema.optional(),
 })
 
 const toDto = (row: PaymentRow) => ({
@@ -59,6 +60,10 @@ export function registerPaymentRoutes(app: FastifyInstance, ctx: AppContext): vo
     if (query.customerId) {
       conditions.push('customer_id = @customerId')
       params['customerId'] = query.customerId
+    }
+    if (query.date) {
+      conditions.push('date = @date')
+      params['date'] = query.date
     }
     const where = conditions.join(' AND ')
 

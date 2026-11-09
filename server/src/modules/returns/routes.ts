@@ -54,6 +54,7 @@ const createSchema = z.object({
 
 const listSchema = paginationSchema.extend({
   customerId: idSchema.optional(),
+  date: isoDateSchema.optional(),
 })
 
 export function registerReturnRoutes(app: FastifyInstance, ctx: AppContext): void {
@@ -116,6 +117,10 @@ export function registerReturnRoutes(app: FastifyInstance, ctx: AppContext): voi
     if (query.customerId) {
       conditions.push('customer_id = @customerId')
       params['customerId'] = query.customerId
+    }
+    if (query.date) {
+      conditions.push('date = @date')
+      params['date'] = query.date
     }
     const where = conditions.join(' AND ')
 

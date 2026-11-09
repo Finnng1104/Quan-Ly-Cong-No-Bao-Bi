@@ -18,6 +18,7 @@ import {
   fmtMoney,
   fmtDate,
   fmtQty,
+  dateFromSearchParams,
   formatPriceInput,
   parsePrice,
   parseQty,
@@ -295,13 +296,14 @@ export default function ReturnsPage() {
   const [delId, setDelId] = useState(null)
   const [editing, setEditing] = useState(null)
   const [limit, setLimit] = useState(PAGE_SIZE)
+  const [filterDate, setFilterDate] = useState(() => dateFromSearchParams(sp))
   const data = useStore()
   const toast = useToast()
   const run = useAction()
 
   const { data: page, error, reload } = useAsync(
-    () => api.returns.list({ limit, offset: 0 }),
-    [limit, data.dataVersion],
+    () => api.returns.list({ date: filterDate, limit, offset: 0 }),
+    [filterDate, limit, data.dataVersion],
   )
   const returns = page?.items ?? []
   const returnCount = page?.total ?? 0
@@ -325,11 +327,20 @@ export default function ReturnsPage() {
         </Button>
       </div>
 
+      {filterDate && (
+        <div className="flex items-center justify-between rounded-xl bg-amber-50 px-3.5 py-2.5 text-[13px] font-semibold text-amber-700">
+          <span>Đang xem ngày {fmtDate(filterDate)}</span>
+          <button onClick={() => setFilterDate('')} className="font-bold active:opacity-60">
+            Xem tất cả
+          </button>
+        </div>
+      )}
+
       {error && !page ? (
         <ErrorCard error={error} onRetry={reload} />
       ) : returns.length === 0 ? (
         <Card>
-          <Empty icon={Undo2} title="Chưa có phiếu trả nào" />
+          <Empty icon={Undo2} title={filterDate ? 'Không có phiếu trả trong ngày này' : 'Chưa có phiếu trả nào'} />
         </Card>
       ) : (
         <Card className="divide-y divide-slate-50 overflow-hidden">
