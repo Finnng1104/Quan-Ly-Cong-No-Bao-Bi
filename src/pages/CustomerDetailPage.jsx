@@ -48,28 +48,39 @@ const kindMeta = {
   adjust: { label: 'Phát sinh', tone: 'cyan' },
 }
 
+// Orders open their detail page; payments and returns open the page that edits them.
+function ledgerRowLink(row) {
+  if (row.kind === 'order') return `/don-hang/${row.refId}`
+  if (row.kind === 'payment') return `/thu-tien?sua=${row.refId}`
+  if (row.kind === 'return') return `/hang-tra?sua=${row.refId}`
+  return null
+}
+
 const NOTE_SUGGESTIONS = ['Tiền ship', 'Tiền VAT hóa đơn số', 'Phí giao hàng', 'Bớt nợ khách quen']
 
-function AdjustmentForm({ open, onClose, customer, data }) {
-  const [dir, setDir] = useState(1) // 1 = cộng nợ, -1 = trừ nợ
-  const [date, setDate] = useState(todayISO())
-  const [amount, setAmount] = useState('')
-  const [note, setNote] = useState('')
+function AdjustmentForm({ open, onClose, customer, data, editing = null }) {
+  // Amounts are signed on the server: positive adds to the debt, negative reduces it.
+  const [dir, setDir] = useState(editing && editing.amount < 0 ? -1 : 1) // 1 = cộng nợ, -1 = trừ nợ
+  const [date, setDate] = useState(editing?.date || todayISO())
+  const [amount, setAmount] = useState(editing ? String(Math.abs(editing.amount)) : '')
+  const [note, setNote] = useState(editing?.note || '')
   const toast = useToast()
   const run = useAction()
 
   const save = () => {
     const amt = Number(amount)
     if (!amt || amt <= 0) return toast.error('Nhập số tiền phát sinh')
+    const payload = { customerId: customer.id, date, amount: amt * dir, note: note.trim() }
     return run(async () => {
-      await data.addAdjustment({ customerId: customer.id, date, amount: amt * dir, note: note.trim() })
+      if (editing) await data.editAdjustment(editing.id, payload)
+      else await data.addAdjustment(payload)
       toast.success(dir > 0 ? `Đã cộng ${fmtMoney(amt)} đ vào công nợ` : `Đã trừ ${fmtMoney(amt)} đ khỏi công nợ`)
       onClose()
     })
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={`Phát sinh — ${customer.name}`}>
+    <Modal open={open} onClose={onClose} title={`${editing ? `Sửa ${editing.code}` : 'Phát sinh'} — ${customer.name}`}>
       <div className="space-y-3.5">
         <Field label="Loại phát sinh">
           <div className="grid grid-cols-2 gap-2">
@@ -121,7 +132,7 @@ function AdjustmentForm({ open, onClose, customer, data }) {
           ))}
         </div>
         <Button size="lg" className="w-full" icon={NotebookPen} onClick={save}>
-          Lưu phát sinh
+          {editing ? 'Lưu thay đổi' : 'Lưu phát sinh'}
         </Button>
       </div>
     </Modal>
@@ -138,6 +149,7 @@ export default function CustomerDetailPage() {
   const [editOpen, setEditOpen] = useState(false)
   const [adjustOpen, setAdjustOpen] = useState(false)
   const [delAdjust, setDelAdjust] = useState(null)
+  const [editingAdjustment, setEditingAdjustment] = useState(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [ledgerLimit, setLedgerLimit] = useState(LEDGER_PAGE_SIZE)
   const toast = useToast()
@@ -161,6 +173,19 @@ export default function CustomerDetailPage() {
 
   const balance = ledgerPage?.balance ?? 0
   const ledger = ledgerPage?.items ?? []
+
+  // Which ledger rows can be tapped: orders open their page, payments and returns open their edit
+  // page, adjustments and the opening debt open a form right here.
+  const isRowEditable = (row) => !!ledgerRowLink(row) || row.kind === 'adjust' || row.kind === 'opening'
+
+  const onLedgerRowClick = (event, row) => {
+    if (ledgerRowLink(row)) return
+    event.preventDefault()
+    if (row.kind === 'opening') setEditOpen(true)
+    if (row.kind === 'adjust') {
+      run(async () => setEditingAdjustment(await api.adjustments.get(row.refId)))
+    }
+  }
   const orders = orderPage?.items ?? []
   const orderCount = orderPage?.total ?? 0
 
@@ -301,9 +326,9 @@ export default function CustomerDetailPage() {
           {ledger.map((r, i) => (
             <Link
               key={i}
-              to={r.kind === 'order' ? `/don-hang/${r.refId}` : '#'}
-              onClick={(e) => r.kind !== 'order' && e.preventDefault()}
-              className={`flex items-center gap-3 px-4 py-3 ${r.kind === 'order' ? 'hover:bg-slate-50/70' : ''}`}
+              to={ledgerRowLink(r) ?? '#'}
+              onClick={(e) => onLedgerRowClick(e, r)}
+              className={`flex items-center gap-3 px-4 py-3 ${isRowEditable(r) ? 'hover:bg-slate-50/70 active:bg-slate-100' : ''}`}
             >
               <div className="w-14 shrink-0">
                 <p className="text-[13px] font-bold text-slate-700">{fmtDate(r.date).slice(0, 5)}</p>
@@ -327,10 +352,15 @@ export default function CustomerDetailPage() {
                   <p className="text-[11px] font-semibold text-slate-400 tabular-nums">
                     dư {fmtMoney(r.balance)}
                   </p>
+                  {r.kind !== 'order' && isRowEditable(r) && (
+                    <Pencil size={12} className="text-slate-300" aria-label="Sửa" />
+                  )}
                   {r.kind === 'adjust' && (
                     <button
                       onClick={(e) => {
+                        // Keep the row itself from also opening the edit form.
                         e.preventDefault()
+                        e.stopPropagation()
                         setDelAdjust(r.refId)
                       }}
                       className="text-slate-300 hover:text-rose-500"
@@ -402,6 +432,10 @@ export default function CustomerDetailPage() {
             </div>
           ))}
         </Card>
+      )}
+
+      {editingAdjustment && (
+        <AdjustmentForm open editing={editingAdjustment} onClose={() => setEditingAdjustment(null)} customer={customer} data={data} />
       )}
 
       <AdjustmentForm

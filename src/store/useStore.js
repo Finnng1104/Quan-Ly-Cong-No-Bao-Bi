@@ -185,6 +185,10 @@ export const useStore = create(
           bump()
           return record
         },
+        restoreReturn: async (id) => {
+          await api.returns.restore(id)
+          bump()
+        },
         removeReturn: async (id) => {
           await api.returns.remove(id)
           bump()
@@ -199,12 +203,21 @@ export const useStore = create(
           bump()
           return record
         },
+        restorePayment: async (id) => {
+          await api.payments.restore(id)
+          bump()
+        },
         removePayment: async (id) => {
           await api.payments.remove(id)
           bump()
         },
         addAdjustment: async (payload) => {
           const record = await api.adjustments.create(payload)
+          bump()
+          return record
+        },
+        editAdjustment: async (id, payload) => {
+          const record = await api.adjustments.update(id, payload)
           bump()
           return record
         },

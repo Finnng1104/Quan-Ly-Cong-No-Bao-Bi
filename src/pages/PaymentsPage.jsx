@@ -1,11 +1,11 @@
-import { useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { HandCoins, User, Save } from 'lucide-react'
 import { useStore, customerName } from '../store/useStore'
 import { api } from '../api/httpApi'
 import { useAsync } from '../hooks/useAsync'
 import { useAction } from '../hooks/useAction'
-import { todayISO, fmtMoney, fmtDate, dateFromSearchParams } from '../lib/format'
+import { todayISO, fmtMoney, fmtDate, dateRangeFromSearchParams, describeDateRange } from '../lib/format'
 import { Card, Money, Badge, Empty, Button, Field, Input, Confirm } from '../components/ui'
 import { ErrorCard } from '../components/AsyncState'
 import { PickerModal, PickerButton, Avatar } from '../components/pickers'
@@ -13,6 +13,9 @@ import { useToast } from '../components/Toast'
 
 export default function PaymentsPage() {
   const [sp] = useSearchParams()
+  const navigate = useNavigate()
+  // Set when the customer's ledger sends the user here to fix one payment; we go back after saving.
+  const editParam = sp.get('sua')
   const [customerId, setCustomerId] = useState(sp.get('khach') || '')
   const [date, setDate] = useState(todayISO())
   const [amount, setAmount] = useState('')
@@ -20,7 +23,8 @@ export default function PaymentsPage() {
   const [custPicker, setCustPicker] = useState(false)
   const [delId, setDelId] = useState(null)
   const [editingId, setEditingId] = useState(null)
-  const [filterDate, setFilterDate] = useState(() => dateFromSearchParams(sp))
+  const [range, setRange] = useState(() => dateRangeFromSearchParams(sp))
+  const [showDeleted, setShowDeleted] = useState(false)
   const data = useStore()
   const toast = useToast()
   const run = useAction()
@@ -33,8 +37,8 @@ export default function PaymentsPage() {
   const debt = customerId && customerInfo?.id === customerId ? customerInfo.balance : null
 
   const { data: paymentPage, error, reload } = useAsync(
-    () => api.payments.list({ date: filterDate, limit: 60 }),
-    [filterDate, data.dataVersion],
+    () => api.payments.list({ from: range?.from, to: range?.to, deleted: showDeleted, limit: 60 }),
+    [range, showDeleted, data.dataVersion],
   )
   const payments = paymentPage?.items ?? []
 
@@ -51,6 +55,7 @@ export default function PaymentsPage() {
         toast.success(`Đã thu ${fmtMoney(rec.amount)} đ — trừ vào công nợ chung`)
       }
       resetForm()
+      if (editParam) navigate(-1)
     })
   }
 
@@ -71,6 +76,16 @@ export default function PaymentsPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
+  const { data: paymentFromLink } = useAsync(
+    () => (editParam ? api.payments.get(editParam) : null),
+    [editParam],
+  )
+  useEffect(() => {
+    if (paymentFromLink) startEditing(paymentFromLink)
+    // Only react to the loaded record; startEditing is recreated on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentFromLink])
+
   return (
     <div className="animate-fade-up space-y-4">
       <div>
@@ -85,7 +100,10 @@ export default function PaymentsPage() {
         {editingId && (
           <div className="flex items-center justify-between rounded-xl bg-sky-50 px-3.5 py-2.5 text-[13px] font-semibold text-sky-700">
             <span>Đang sửa {payments.find((p) => p.id === editingId)?.code ?? 'phiếu thu'}</span>
-            <button onClick={resetForm} className="font-bold active:opacity-60">
+            <button
+              onClick={() => (editParam ? navigate(-1) : resetForm())}
+              className="font-bold active:opacity-60"
+            >
               Hủy
             </button>
           </div>
@@ -149,13 +167,24 @@ export default function PaymentsPage() {
       {/* lịch sử thu */}
       <div className="flex items-center justify-between">
         <h2 className="text-[15px] font-bold text-slate-700">Lịch sử thu tiền</h2>
-        <Badge tone="emerald">{payments.length} phiếu</Badge>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowDeleted((on) => !on)}
+            aria-pressed={showDeleted}
+            className={`rounded-lg px-2.5 py-1.5 text-[12px] font-semibold transition-colors active:scale-[0.97] ${
+              showDeleted ? 'bg-rose-50 text-rose-600' : 'text-slate-400 hover:bg-slate-50'
+            }`}
+          >
+            Đã xóa
+          </button>
+          <Badge tone="emerald">{payments.length} phiếu</Badge>
+        </div>
       </div>
 
-      {filterDate && (
+      {range && (
         <div className="flex items-center justify-between rounded-xl bg-emerald-50 px-3.5 py-2.5 text-[13px] font-semibold text-emerald-700">
-          <span>Đang xem ngày {fmtDate(filterDate)}</span>
-          <button onClick={() => setFilterDate('')} className="font-bold active:opacity-60">
+          <span>Đang xem {describeDateRange(range)}</span>
+          <button onClick={() => setRange(null)} className="font-bold active:opacity-60">
             Xem tất cả
           </button>
         </div>
@@ -165,7 +194,7 @@ export default function PaymentsPage() {
         <ErrorCard error={error} onRetry={reload} />
       ) : payments.length === 0 ? (
         <Card>
-          <Empty icon={HandCoins} title={filterDate ? 'Không có phiếu thu trong ngày này' : 'Chưa có phiếu thu nào'} />
+          <Empty icon={HandCoins} title={showDeleted ? 'Chưa có phiếu thu nào bị xóa' : range ? 'Không có phiếu thu trong khoảng này' : 'Chưa có phiếu thu nào'} />
         </Card>
       ) : (
         <Card className="divide-y divide-slate-50 overflow-hidden">
@@ -186,12 +215,28 @@ export default function PaymentsPage() {
               <div className="text-right">
                 <Money value={p.amount} className="text-[14px] text-emerald-600" sign />
                 <div className="mt-0.5 flex justify-end gap-3 text-[11px] font-semibold text-slate-400">
-                  <button onClick={() => startEditing(p)} className="active:text-emerald-600 hover:text-emerald-600">
-                    Sửa
-                  </button>
-                  <button onClick={() => setDelId(p.id)} className="active:text-rose-500 hover:text-rose-500">
-                    Xóa
-                  </button>
+                  {showDeleted ? (
+                    <button
+                      onClick={() =>
+                        run(async () => {
+                          await data.restorePayment(p.id)
+                          toast.success(`Đã khôi phục ${p.code}`)
+                        })
+                      }
+                      className="text-emerald-600 active:opacity-60"
+                    >
+                      Khôi phục
+                    </button>
+                  ) : (
+                    <>
+                      <button onClick={() => startEditing(p)} className="active:text-emerald-600 hover:text-emerald-600">
+                        Sửa
+                      </button>
+                      <button onClick={() => setDelId(p.id)} className="active:text-rose-500 hover:text-rose-500">
+                        Xóa
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>

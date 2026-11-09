@@ -27,6 +27,8 @@ export default function DashboardPage() {
   const { data: board, error, reload } = useAsync(() => api.reports.dashboard(date), [date, dataVersion])
 
   // All figures come from the server; zeros are shown until the first answer arrives.
+  // The month tiles cover the first of the month up to the chosen day, like the server's totals.
+  const monthStartISO = `${date.slice(0, 8)}01`
   const totalDebt = board?.totalDebt ?? 0
   const debtorCount = board?.debtorCount ?? 0
   const day = board?.day ?? EMPTY_DAY
@@ -67,13 +69,17 @@ export default function DashboardPage() {
             {fmtMoney(totalDebt)}
             <span className="ml-1.5 text-lg font-semibold text-indigo-200">đ</span>
           </p>
-          <div className="mt-3 flex items-center gap-1.5 text-[12px] font-medium text-indigo-100">
+          <Link
+            to={`/khach?no=1&den=${date}`}
+            className="mt-3 flex w-fit items-center gap-1.5 text-[12px] font-medium text-indigo-100 active:opacity-60"
+          >
             <TrendingUp size={14} />
             {debtorCount} khách còn nợ
-          </div>
+            <ChevronRight size={13} />
+          </Link>
         </div>
         <div className="grid grid-cols-3 divide-x divide-slate-100">
-          <Link to={`/don-hang?ngay=${date}`} className="block p-3.5 text-center transition-colors active:bg-slate-100 hover:bg-slate-50">
+          <Link to={`/don-hang?tu=${date}&den=${date}`} className="block p-3.5 text-center transition-colors active:bg-slate-100 hover:bg-slate-50">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
               Đơn hôm nay
             </p>
@@ -82,7 +88,7 @@ export default function DashboardPage() {
             </p>
             <p className="text-[11px] text-slate-400">{day.orderCount} đơn</p>
           </Link>
-          <Link to={`/thu-tien?ngay=${date}`} className="block p-3.5 text-center transition-colors active:bg-slate-100 hover:bg-slate-50">
+          <Link to={`/thu-tien?tu=${date}&den=${date}`} className="block p-3.5 text-center transition-colors active:bg-slate-100 hover:bg-slate-50">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
               Thu hôm nay
             </p>
@@ -91,7 +97,7 @@ export default function DashboardPage() {
             </p>
             <p className="text-[11px] text-slate-400">{day.paymentCount} lần</p>
           </Link>
-          <Link to={`/hang-tra?ngay=${date}`} className="block p-3.5 text-center transition-colors active:bg-slate-100 hover:bg-slate-50">
+          <Link to={`/hang-tra?tu=${date}&den=${date}`} className="block p-3.5 text-center transition-colors active:bg-slate-100 hover:bg-slate-50">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
               Trả hàng
             </p>
@@ -105,7 +111,8 @@ export default function DashboardPage() {
 
       {/* tháng này */}
       <div className="grid grid-cols-2 gap-3">
-        <Card className="p-4">
+        <Link to={`/don-hang?tu=${monthStartISO}&den=${date}`} className="block">
+        <Card className="h-full p-4 transition-colors active:bg-slate-50">
           <div className="flex items-center gap-2 text-slate-400">
             <ReceiptText size={15} />
             <p className="text-[12px] font-semibold">Đơn trong tháng</p>
@@ -115,7 +122,9 @@ export default function DashboardPage() {
           </p>
           <p className="text-[11px] text-slate-400">{month.orderCount} đơn</p>
         </Card>
-        <Card className="p-4">
+        </Link>
+        <Link to={`/thu-tien?tu=${monthStartISO}&den=${date}`} className="block">
+        <Card className="h-full p-4 transition-colors active:bg-slate-50">
           <div className="flex items-center gap-2 text-slate-400">
             <HandCoins size={15} />
             <p className="text-[12px] font-semibold">Thu trong tháng</p>
@@ -125,6 +134,7 @@ export default function DashboardPage() {
           </p>
           <p className="text-[11px] text-slate-400">đến {fmtDate(date)}</p>
         </Card>
+        </Link>
       </div>
 
       {/* biểu đồ nợ 14 ngày */}

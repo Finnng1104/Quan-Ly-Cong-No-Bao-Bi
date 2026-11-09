@@ -36,6 +36,10 @@ const createSchema = z.object({
 const listSchema = paginationSchema.extend({
   customerId: idSchema.optional(),
   date: isoDateSchema.optional(),
+  from: isoDateSchema.optional(),
+  to: isoDateSchema.optional(),
+  // Query strings carry no booleans; "1" lists the deleted ones instead, so they can be restored.
+  deleted: z.enum(['0', '1'], { error: 'Chỉ nhận 0 hoặc 1' }).default('0'),
 })
 
 const toDto = (row: PaymentRow) => ({
@@ -55,7 +59,8 @@ export function registerPaymentRoutes(app: FastifyInstance, ctx: AppContext): vo
     const { branchId } = authorize(request, 'payments:read')
     const query = parseInput(listSchema, request.query)
 
-    const conditions = ['branch_id = @branchId', 'deleted_at IS NULL']
+    const listDeleted = query.deleted === '1'
+    const conditions = ['branch_id = @branchId', listDeleted ? 'deleted_at IS NOT NULL' : 'deleted_at IS NULL']
     const params: Record<string, string | number> = { branchId }
     if (query.customerId) {
       conditions.push('customer_id = @customerId')
@@ -65,11 +70,21 @@ export function registerPaymentRoutes(app: FastifyInstance, ctx: AppContext): vo
       conditions.push('date = @date')
       params['date'] = query.date
     }
+    if (query.from) {
+      conditions.push('date >= @from')
+      params['from'] = query.from
+    }
+    if (query.to) {
+      conditions.push('date <= @to')
+      params['to'] = query.to
+    }
     const where = conditions.join(' AND ')
+    // The one deleted by mistake a minute ago must be at the top, whatever its date.
+    const orderBy = listDeleted ? 'deleted_at DESC, date DESC, seq DESC' : 'date DESC, seq DESC'
 
     const rows = ctx.db
       .prepare(
-        `SELECT * FROM payments WHERE ${where} ORDER BY date DESC, seq DESC LIMIT @limit OFFSET @offset`,
+        `SELECT * FROM payments WHERE ${where} ORDER BY ${orderBy} LIMIT @limit OFFSET @offset`,
       )
       .all({ ...params, limit: query.limit, offset: query.offset }) as PaymentRow[]
     const total = (
@@ -111,6 +126,16 @@ export function registerPaymentRoutes(app: FastifyInstance, ctx: AppContext): vo
     return toDto(ctx.db.prepare('SELECT * FROM payments WHERE id = ?').get(id) as PaymentRow)
   })
 
+  app.get('/api/payments/:id', async (request) => {
+    const { branchId } = authorize(request, 'payments:read')
+    const { id } = request.params as { id: string }
+    const row = ctx.db
+      .prepare('SELECT * FROM payments WHERE id = ? AND branch_id = ? AND deleted_at IS NULL')
+      .get(id, branchId) as PaymentRow | undefined
+    if (!row) throw new AppError('NOT_FOUND', 'Không tìm thấy phiếu thu')
+    return toDto(row)
+  })
+
   // Editing keeps the code, sequence number and creation time so the ledger order stays stable.
   app.put('/api/payments/:id', async (request) => {
     const { branchId } = authorize(request, 'payments:write')
@@ -126,6 +151,20 @@ export function registerPaymentRoutes(app: FastifyInstance, ctx: AppContext): vo
     ctx.db
       .prepare('UPDATE payments SET customer_id = ?, date = ?, amount = ?, note = ? WHERE id = ? AND branch_id = ?')
       .run(body.customerId, body.date, body.amount, body.note, id, branchId)
+    return toDto(ctx.db.prepare('SELECT * FROM payments WHERE id = ?').get(id) as PaymentRow)
+  })
+
+  app.post('/api/payments/:id/restore', async (request) => {
+    const { branchId } = authorize(request, 'payments:write')
+    const { id } = request.params as { id: string }
+    const row = ctx.db
+      .prepare('SELECT customer_id FROM payments WHERE id = ? AND branch_id = ?')
+      .get(id, branchId) as { customer_id: string } | undefined
+    if (!row) throw new AppError('NOT_FOUND', 'Không tìm thấy phiếu thu')
+    // A payment cannot come back for a customer who has been deleted meanwhile.
+    requireCustomer(ctx.db, branchId, row.customer_id)
+
+    ctx.db.prepare('UPDATE payments SET deleted_at = NULL WHERE id = ? AND branch_id = ?').run(id, branchId)
     return toDto(ctx.db.prepare('SELECT * FROM payments WHERE id = ?').get(id) as PaymentRow)
   })
 

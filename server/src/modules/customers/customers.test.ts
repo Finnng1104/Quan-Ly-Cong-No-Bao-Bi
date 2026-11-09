@@ -120,6 +120,14 @@ describe('customers', () => {
       expect(response.body.items[0].name).toBe('Anh Khoa')
     })
 
+    it('can keep only the customers who owe money', async () => {
+      const response = await t.api.get('/api/customers?debtOnly=1')
+
+      expect(response.body.items.map((c: { name: string }) => c.name)).not.toContain('Anh Khoa')
+      expect(response.body.total).toBe(3)
+      expect(response.body.items.every((c: { balance: number }) => c.balance > 0)).toBe(true)
+    })
+
     it('finds customers by name or phone, with or without diacritics', async () => {
       const byAccentless = await t.api.get('/api/customers?q=phuong')
       const byAccent = await t.api.get('/api/customers?q=Phượng')

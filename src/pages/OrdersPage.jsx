@@ -4,7 +4,7 @@ import { CalendarDays, History, ChevronRight, User, PlusCircle, Trash2 } from 'l
 import { useStore } from '../store/useStore'
 import { api } from '../api/httpApi'
 import { useAsync } from '../hooks/useAsync'
-import { fmtMoney, fmtDate, fmtDateTime, fmtQty, dateFromSearchParams } from '../lib/format'
+import { fmtMoney, fmtDate, fmtDateTime, fmtQty, dateRangeFromSearchParams, describeDateRange } from '../lib/format'
 import { Card, Money, Badge, Empty, Button } from '../components/ui'
 import { ErrorCard } from '../components/AsyncState'
 import { PickerModal, PickerButton, Avatar } from '../components/pickers'
@@ -15,7 +15,9 @@ const PAGE_SIZE = 50
 export default function OrdersPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const [date, setDate] = useState(() => dateFromSearchParams(searchParams))
+  const [date, setDate] = useState('')
+  // A from/to range arrives from the dashboard links; picking a single day below replaces it.
+  const [range, setRange] = useState(() => dateRangeFromSearchParams(searchParams))
   const [customerId, setCustomerId] = useState('')
   const [showDeleted, setShowDeleted] = useState(false)
   const [custPicker, setCustPicker] = useState(false)
@@ -23,8 +25,8 @@ export default function OrdersPage() {
   const data = useStore()
 
   const { data: page, error, reload } = useAsync(
-    () => api.orders.list({ date, customerId, deleted: showDeleted, limit, offset: 0 }),
-    [date, customerId, showDeleted, limit, data.dataVersion],
+    () => api.orders.list({ date, from: range?.from, to: range?.to, customerId, deleted: showDeleted, limit, offset: 0 }),
+    [date, range, customerId, showDeleted, limit, data.dataVersion],
   )
 
   const orders = page?.items ?? []
@@ -48,7 +50,10 @@ export default function OrdersPage() {
           <input
             type="date"
             value={date}
-            onChange={(e) => setDate(e.target.value)}
+            onChange={(e) => {
+              setDate(e.target.value)
+              setRange(null)
+            }}
             className="bg-transparent outline-none"
           />
         </label>
@@ -71,10 +76,11 @@ export default function OrdersPage() {
         >
           <Trash2 size={14} /> Đơn đã xóa
         </button>
-        {(date || customerId || showDeleted) && (
+        {(date || range || customerId || showDeleted) && (
           <button
             onClick={() => {
               setDate('')
+              setRange(null)
               setCustomerId('')
               setShowDeleted(false)
               setLimit(PAGE_SIZE)
@@ -85,6 +91,15 @@ export default function OrdersPage() {
           </button>
         )}
       </Card>
+
+      {range && (
+        <div className="flex items-center justify-between rounded-xl bg-indigo-50 px-3.5 py-2.5 text-[13px] font-semibold text-indigo-700">
+          <span>Đang xem {describeDateRange(range)}</span>
+          <button onClick={() => setRange(null)} className="font-bold active:opacity-60">
+            Xem tất cả
+          </button>
+        </div>
+      )}
 
       <div className="flex items-center justify-between text-[13px] font-semibold">
         <span className="text-slate-500">{orderCount} đơn</span>
@@ -165,7 +180,7 @@ export default function OrdersPage() {
       )}
 
       {/* tổng cuối ngày — đơn đã xóa không tính vào đây nên ẩn khi đang xem chúng */}
-      {!showDeleted && (
+      {!showDeleted && !range && (
         <Card className="flex items-center justify-between bg-gradient-to-r from-indigo-600 to-blue-600 p-4 text-white">
           <p className="text-[13.5px] font-semibold">
             Tổng đơn {date ? fmtDate(date) : 'hôm nay'}

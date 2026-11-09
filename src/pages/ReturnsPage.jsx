@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Undo2,
   Plus,
@@ -18,7 +18,8 @@ import {
   fmtMoney,
   fmtDate,
   fmtQty,
-  dateFromSearchParams,
+  dateRangeFromSearchParams,
+  describeDateRange,
   formatPriceInput,
   parsePrice,
   parseQty,
@@ -292,19 +293,33 @@ function ReturnForm({ open, onClose, presetCustomer, editing = null }) {
 
 export default function ReturnsPage() {
   const [sp] = useSearchParams()
+  const navigate = useNavigate()
+  // Set when the customer's ledger sends the user here to fix one return; we go back afterwards.
+  const editParam = sp.get('sua')
   const [formOpen, setFormOpen] = useState(!!sp.get('khach'))
   const [delId, setDelId] = useState(null)
   const [editing, setEditing] = useState(null)
   const [limit, setLimit] = useState(PAGE_SIZE)
-  const [filterDate, setFilterDate] = useState(() => dateFromSearchParams(sp))
+  const [range, setRange] = useState(() => dateRangeFromSearchParams(sp))
+  const [showDeleted, setShowDeleted] = useState(false)
   const data = useStore()
   const toast = useToast()
   const run = useAction()
 
   const { data: page, error, reload } = useAsync(
-    () => api.returns.list({ date: filterDate, limit, offset: 0 }),
-    [filterDate, limit, data.dataVersion],
+    () => api.returns.list({ from: range?.from, to: range?.to, deleted: showDeleted, limit, offset: 0 }),
+    [range, showDeleted, limit, data.dataVersion],
   )
+  const { data: returnFromLink } = useAsync(
+    () => (editParam ? api.returns.get(editParam) : null),
+    [editParam],
+  )
+  // A return opened from the ledger link shows its form until the user closes it.
+  const [linkDismissed, setLinkDismissed] = useState(false)
+  const linkedReturn = linkDismissed ? null : returnFromLink
+  const formVisible = formOpen || !!linkedReturn
+  const formRecord = editing ?? linkedReturn
+
   const returns = page?.items ?? []
   const returnCount = page?.total ?? 0
 
@@ -327,10 +342,22 @@ export default function ReturnsPage() {
         </Button>
       </div>
 
-      {filterDate && (
+      <div className="flex justify-end">
+        <button
+          onClick={() => setShowDeleted((on) => !on)}
+          aria-pressed={showDeleted}
+          className={`rounded-lg px-2.5 py-1.5 text-[12px] font-semibold transition-colors active:scale-[0.97] ${
+            showDeleted ? 'bg-rose-50 text-rose-600' : 'text-slate-400 hover:bg-slate-50'
+          }`}
+        >
+          Đã xóa
+        </button>
+      </div>
+
+      {range && (
         <div className="flex items-center justify-between rounded-xl bg-amber-50 px-3.5 py-2.5 text-[13px] font-semibold text-amber-700">
-          <span>Đang xem ngày {fmtDate(filterDate)}</span>
-          <button onClick={() => setFilterDate('')} className="font-bold active:opacity-60">
+          <span>Đang xem {describeDateRange(range)}</span>
+          <button onClick={() => setRange(null)} className="font-bold active:opacity-60">
             Xem tất cả
           </button>
         </div>
@@ -340,7 +367,7 @@ export default function ReturnsPage() {
         <ErrorCard error={error} onRetry={reload} />
       ) : returns.length === 0 ? (
         <Card>
-          <Empty icon={Undo2} title={filterDate ? 'Không có phiếu trả trong ngày này' : 'Chưa có phiếu trả nào'} />
+          <Empty icon={Undo2} title={showDeleted ? 'Chưa có phiếu trả nào bị xóa' : range ? 'Không có phiếu trả trong khoảng này' : 'Chưa có phiếu trả nào'} />
         </Card>
       ) : (
         <Card className="divide-y divide-slate-50 overflow-hidden">
@@ -364,18 +391,34 @@ export default function ReturnsPage() {
               <div className="text-right">
                 <Money value={r.total} className="text-[14px] text-amber-600" />
                 <div className="mt-0.5 flex justify-end gap-3 text-[11px] font-semibold text-slate-400">
-                  <button
-                    onClick={() => {
-                      setEditing(r)
-                      setFormOpen(true)
-                    }}
-                    className="active:text-amber-600 hover:text-amber-600"
-                  >
-                    Sửa
-                  </button>
-                  <button onClick={() => setDelId(r.id)} className="active:text-rose-500 hover:text-rose-500">
-                    Xóa
-                  </button>
+                  {showDeleted ? (
+                    <button
+                      onClick={() =>
+                        run(async () => {
+                          await data.restoreReturn(r.id)
+                          toast.success(`Đã khôi phục ${r.code}`)
+                        })
+                      }
+                      className="text-amber-600 active:opacity-60"
+                    >
+                      Khôi phục
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => {
+                          setEditing(r)
+                          setFormOpen(true)
+                        }}
+                        className="active:text-amber-600 hover:text-amber-600"
+                      >
+                        Sửa
+                      </button>
+                      <button onClick={() => setDelId(r.id)} className="active:text-rose-500 hover:text-rose-500">
+                        Xóa
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -390,13 +433,15 @@ export default function ReturnsPage() {
       )}
 
       {/* Mounted only while open so each use starts from fresh state (blank, or the record being edited). */}
-      {formOpen && (
+      {formVisible && (
         <ReturnForm
           open
-          editing={editing}
+          editing={formRecord}
           onClose={() => {
             setFormOpen(false)
             setEditing(null)
+            setLinkDismissed(true)
+            if (editParam) navigate(-1)
           }}
           presetCustomer={sp.get('khach')}
         />

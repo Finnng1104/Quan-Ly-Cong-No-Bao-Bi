@@ -135,6 +135,8 @@ export interface ListCustomersParams {
   q: string
   sort: CustomerSort
   asOf: string
+  /** Only customers who owe money on `asOf`, like the dashboard's "còn nợ" count. */
+  debtOnly: boolean
   limit: number
   offset: number
 }
@@ -202,9 +204,10 @@ export function listCustomers(db: Database, branchId: string, params: ListCustom
         LEFT JOIN bal ON bal.customer_id = c.id
         LEFT JOIN act ON act.customer_id = c.id
        WHERE c.branch_id = @branchId AND c.deleted_at IS NULL AND c.search_text LIKE @like ESCAPE '\\'
+         AND (@debtOnly = 0 OR COALESCE(bal.balance, 0) > 0)
     )`
 
-  const named = { branchId, asOf: params.asOf, like }
+  const named = { branchId, asOf: params.asOf, like, debtOnly: params.debtOnly ? 1 : 0 }
 
   const rows = db
     .prepare(

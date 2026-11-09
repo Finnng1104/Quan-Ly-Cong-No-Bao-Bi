@@ -65,6 +65,32 @@ describe('returns, payments and adjustments', () => {
       expect((await t.api.delete('/api/payments/nope')).status).toBe(404)
     })
 
+    it('can be listed for a date range, deleted ones listed and restored', async () => {
+      const early = await t.api.post('/api/payments', { customerId: w.customerId, date: '2026-10-05', amount: 1000 })
+      await t.api.post('/api/payments', { customerId: w.customerId, date: '2026-10-09', amount: 2000 })
+
+      const range = await t.api.get('/api/payments?from=2026-10-08&to=2026-10-10')
+      expect(range.body.items.map((p: { amount: number }) => p.amount)).toEqual([2000])
+
+      await t.api.delete(`/api/payments/${early.body.id}`)
+      const deleted = await t.api.get('/api/payments?deleted=1')
+      expect(deleted.body.items.map((p: { id: string }) => p.id)).toEqual([early.body.id])
+
+      const restored = await t.api.post(`/api/payments/${early.body.id}/restore`)
+      expect(restored.status).toBe(200)
+      expect(restored.body.deletedAt).toBeNull()
+      expect((await t.api.get('/api/payments')).body.total).toBe(2)
+      expect((await t.api.post('/api/payments/nope/restore')).status).toBe(404)
+    })
+
+    it('can be fetched one by one, unless deleted', async () => {
+      const created = await t.api.post('/api/payments', { customerId: w.customerId, date: '2026-10-09', amount: 1000 })
+
+      expect((await t.api.get(`/api/payments/${created.body.id}`)).body).toMatchObject({ code: 'TT-0001', amount: 1000 })
+      await t.api.delete(`/api/payments/${created.body.id}`)
+      expect((await t.api.get(`/api/payments/${created.body.id}`)).status).toBe(404)
+    })
+
     it('can be listed for a single day', async () => {
       await t.api.post('/api/payments', { customerId: w.customerId, date: '2026-10-08', amount: 1000 })
       await t.api.post('/api/payments', { customerId: w.customerId, date: '2026-10-09', amount: 2000 })
@@ -136,6 +162,31 @@ describe('returns, payments and adjustments', () => {
       ).toBe(400)
     })
 
+    it('can be listed for a date range, deleted ones listed and restored', async () => {
+      const early = await t.api.post('/api/returns', body({ date: '2026-10-05' }))
+      await t.api.post('/api/returns', body({ date: '2026-10-09' }))
+
+      expect((await t.api.get('/api/returns?from=2026-10-08&to=2026-10-10')).body.total).toBe(1)
+
+      await t.api.delete(`/api/returns/${early.body.id}`)
+      expect((await t.api.get('/api/returns?deleted=1')).body.items.map((r: { id: string }) => r.id)).toEqual([
+        early.body.id,
+      ])
+
+      const restored = await t.api.post(`/api/returns/${early.body.id}/restore`)
+      expect(restored.status).toBe(200)
+      expect((await t.api.get('/api/returns')).body.total).toBe(2)
+      expect((await t.api.post('/api/returns/nope/restore')).status).toBe(404)
+    })
+
+    it('can be fetched one by one, unless deleted', async () => {
+      const created = await t.api.post('/api/returns', body())
+
+      expect((await t.api.get(`/api/returns/${created.body.id}`)).body).toMatchObject({ code: 'TH-0001', total: 3000 })
+      await t.api.delete(`/api/returns/${created.body.id}`)
+      expect((await t.api.get(`/api/returns/${created.body.id}`)).status).toBe(404)
+    })
+
     it('can be listed for a single day', async () => {
       await t.api.post('/api/returns', body({ date: '2026-10-08' }))
       await t.api.post('/api/returns', body({ date: '2026-10-09' }))
@@ -200,6 +251,42 @@ describe('returns, payments and adjustments', () => {
       expect(ship.body.code).toBe('PS-0001')
       expect(await debtOn('2026-10-08')).toBe(59356)
       expect(await debtOn('2026-10-09')).toBe(59356 + 30000 - 5000)
+    })
+
+    it('can be edited, keeping their code, and the debt follows', async () => {
+      const created = await t.api.post('/api/adjustments', {
+        customerId: w.customerId,
+        date: '2026-10-09',
+        amount: 30000,
+        note: 'Tiền ship',
+      })
+
+      const edited = await t.api.put(`/api/adjustments/${created.body.id}`, {
+        customerId: w.customerId,
+        date: '2026-10-09',
+        amount: -5000,
+        note: 'Bớt nợ',
+      })
+
+      expect(edited.status).toBe(200)
+      expect(edited.body).toMatchObject({ code: 'PS-0001', amount: -5000, note: 'Bớt nợ' })
+      expect((await t.api.get(`/api/adjustments/${created.body.id}`)).body.amount).toBe(-5000)
+      expect(await debtOn('2026-10-09')).toBe(59356 - 5000)
+    })
+
+    it('cannot be edited to zero, or when unknown or deleted', async () => {
+      const created = await t.api.post('/api/adjustments', {
+        customerId: w.customerId,
+        date: '2026-10-09',
+        amount: 1000,
+      })
+      const base = { customerId: w.customerId, date: '2026-10-09', amount: 1000 }
+
+      expect((await t.api.put(`/api/adjustments/${created.body.id}`, { ...base, amount: 0 })).status).toBe(400)
+      expect((await t.api.put('/api/adjustments/nope', base)).status).toBe(404)
+      await t.api.delete(`/api/adjustments/${created.body.id}`)
+      expect((await t.api.put(`/api/adjustments/${created.body.id}`, base)).status).toBe(404)
+      expect((await t.api.get(`/api/adjustments/${created.body.id}`)).status).toBe(404)
     })
 
     it('reject a zero amount', async () => {

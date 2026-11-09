@@ -59,6 +59,8 @@ const updateBodySchema = orderBodySchema.extend({
 
 const listSchema = paginationSchema.extend({
   date: isoDateSchema.optional(),
+  from: isoDateSchema.optional(),
+  to: isoDateSchema.optional(),
   customerId: idSchema.optional(),
   // Query strings carry no booleans; "1" lists the deleted orders instead, so they can be restored.
   deleted: z.enum(['0', '1'], { error: 'Chỉ nhận 0 hoặc 1' }).default('0'),
@@ -81,6 +83,14 @@ export function registerOrderRoutes(app: FastifyInstance, ctx: AppContext): void
     if (query.date) {
       conditions.push('date = @date')
       params['date'] = query.date
+    }
+    if (query.from) {
+      conditions.push('date >= @from')
+      params['from'] = query.from
+    }
+    if (query.to) {
+      conditions.push('date <= @to')
+      params['to'] = query.to
     }
     if (query.customerId) {
       conditions.push('customer_id = @customerId')

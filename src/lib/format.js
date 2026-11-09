@@ -149,8 +149,23 @@ export function toCsv(rows) {
   return '﻿' + rows.map((r) => r.map(esc).join(';')).join('\r\n')
 }
 
-/** Reads a `?ngay=YYYY-MM-DD` filter from the URL; anything else counts as "no filter". */
-export function dateFromSearchParams(searchParams) {
-  const value = searchParams.get('ngay') ?? ''
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : ''
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+
+/**
+ * Reads a date filter from the URL as { from, to } (both inclusive) or null.
+ * `?tu=…&den=…` is a range; `?ngay=…` is a single day.
+ */
+export function dateRangeFromSearchParams(searchParams) {
+  const day = searchParams.get('ngay') ?? ''
+  if (ISO_DATE.test(day)) return { from: day, to: day }
+  const from = searchParams.get('tu') ?? ''
+  const to = searchParams.get('den') ?? ''
+  if (ISO_DATE.test(from) && ISO_DATE.test(to)) return { from, to }
+  return null
+}
+
+/** "ngày 09/11/2026" for one day, "từ 01/11 đến 09/11/2026" for a range. */
+export function describeDateRange(range) {
+  if (range.from === range.to) return `ngày ${fmtDate(range.to)}`
+  return `từ ${fmtDate(range.from).slice(0, 5)} đến ${fmtDate(range.to)}`
 }

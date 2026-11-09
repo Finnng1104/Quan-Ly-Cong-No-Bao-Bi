@@ -256,6 +256,12 @@ describe('orders', () => {
       expect(all.body.total).toBe(3)
       expect(all.body.summary.filteredTotal).toBe(10000 + 5000 + 2500 + 1000)
 
+      // A from/to range is inclusive on both ends.
+      const byRange = await t.api.get('/api/orders?from=2026-10-08&to=2026-10-09')
+      expect(byRange.body.total).toBe(3)
+      expect((await t.api.get('/api/orders?from=2026-10-09&to=2026-10-09')).body.total).toBe(2)
+      expect((await t.api.get('/api/orders?from=tomorrow')).status).toBe(400)
+
       const byDate = await t.api.get('/api/orders?date=2026-10-09')
       expect(byDate.body.items).toHaveLength(2)
       expect(byDate.body.summary.dayTotal).toBe(5000 + 1000)

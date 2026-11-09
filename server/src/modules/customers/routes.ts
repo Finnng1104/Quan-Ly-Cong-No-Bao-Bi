@@ -47,6 +47,8 @@ const listSchema = paginationSchema.extend({
   q: z.string().max(100).default(''),
   sort: z.enum(['debt_desc', 'debt_asc']).default('debt_desc'),
   asOf: isoDateSchema.optional(),
+  // Query strings carry no booleans; "1" keeps only customers who owe money.
+  debtOnly: z.enum(['0', '1']).default('0'),
 })
 
 const asOfSchema = z.object({ asOf: isoDateSchema.optional() })
@@ -61,6 +63,7 @@ export function registerCustomerRoutes(app: FastifyInstance, ctx: AppContext): v
       q: query.q,
       sort: query.sort,
       asOf: query.asOf ?? today(),
+      debtOnly: query.debtOnly === '1',
       limit: query.limit,
       offset: query.offset,
     })

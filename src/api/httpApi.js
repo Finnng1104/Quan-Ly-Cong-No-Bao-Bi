@@ -42,14 +42,14 @@ export const api = {
 
   customers: {
     /** One page: { items, total, summary }. Items carry `debt`, `act` (that day's activity), `priceCount`. */
-    list: async ({ q, sort, asOf, limit, offset = 0 } = {}) => {
+    list: async ({ q, sort, asOf, debtOnly, limit, offset = 0 } = {}) => {
       // The server rejects a page larger than PAGE_SIZE, but "Xem thêm" keeps growing `limit`,
       // so a long list is fetched as several consecutive pages and stitched together.
       const items = []
       let page
       do {
         page = await request('GET', '/customers', {
-          query: { q, sort, asOf, limit: Math.min(PAGE_SIZE, limit - items.length), offset: offset + items.length },
+          query: { q, sort, asOf, debtOnly: debtOnly ? 1 : undefined, limit: Math.min(PAGE_SIZE, limit - items.length), offset: offset + items.length },
         })
         items.push(...page.items)
         // An empty page means the list ended early (e.g. rows deleted meanwhile).
@@ -105,8 +105,8 @@ export const api = {
      * { items, total, summary: { filteredTotal, dayTotal } }; items have `editCount`.
      * `deleted: true` lists only deleted orders, most recently deleted first.
      */
-    list: async ({ date, customerId, deleted, limit, offset } = {}) => {
-      const query = { date, customerId, deleted: deleted ? 1 : undefined, limit, offset }
+    list: async ({ date, from, to, customerId, deleted, limit, offset } = {}) => {
+      const query = { date, from, to, customerId, deleted: deleted ? 1 : undefined, limit, offset }
       const result = await request('GET', '/orders', { query })
       return { ...result, items: result.items.map(toOrder) }
     },
@@ -119,23 +119,29 @@ export const api = {
   },
 
   returns: {
-    list: ({ customerId, date, limit, offset } = {}) =>
-      request('GET', '/returns', { query: { customerId, date, limit, offset } }),
+    list: ({ customerId, from, to, deleted, limit, offset } = {}) =>
+      request('GET', '/returns', { query: { customerId, from, to, deleted: deleted ? 1 : undefined, limit, offset } }),
+    get: (id) => request('GET', `/returns/${id}`),
     create: (payload) => request('POST', '/returns', { body: payload }),
     update: (id, payload) => request('PUT', `/returns/${id}`, { body: payload }),
     remove: (id) => request('DELETE', `/returns/${id}`),
+    restore: (id) => request('POST', `/returns/${id}/restore`),
   },
 
   payments: {
-    list: ({ customerId, date, limit, offset } = {}) =>
-      request('GET', '/payments', { query: { customerId, date, limit, offset } }),
+    list: ({ customerId, from, to, deleted, limit, offset } = {}) =>
+      request('GET', '/payments', { query: { customerId, from, to, deleted: deleted ? 1 : undefined, limit, offset } }),
+    get: (id) => request('GET', `/payments/${id}`),
     create: (payload) => request('POST', '/payments', { body: payload }),
     update: (id, payload) => request('PUT', `/payments/${id}`, { body: payload }),
     remove: (id) => request('DELETE', `/payments/${id}`),
+    restore: (id) => request('POST', `/payments/${id}/restore`),
   },
 
   adjustments: {
+    get: (id) => request('GET', `/adjustments/${id}`),
     create: (payload) => request('POST', '/adjustments', { body: payload }),
+    update: (id, payload) => request('PUT', `/adjustments/${id}`, { body: payload }),
     remove: (id) => request('DELETE', `/adjustments/${id}`),
   },
 

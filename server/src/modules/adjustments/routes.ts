@@ -107,6 +107,34 @@ export function registerAdjustmentRoutes(app: FastifyInstance, ctx: AppContext):
     return toDto(ctx.db.prepare('SELECT * FROM adjustments WHERE id = ?').get(id) as AdjustmentRow)
   })
 
+  app.get('/api/adjustments/:id', async (request) => {
+    const { branchId } = authorize(request, 'adjustments:read')
+    const { id } = request.params as { id: string }
+    const row = ctx.db
+      .prepare('SELECT * FROM adjustments WHERE id = ? AND branch_id = ? AND deleted_at IS NULL')
+      .get(id, branchId) as AdjustmentRow | undefined
+    if (!row) throw new AppError('NOT_FOUND', 'Không tìm thấy phát sinh')
+    return toDto(row)
+  })
+
+  // Editing keeps the code, sequence number and creation time so the ledger order stays stable.
+  app.put('/api/adjustments/:id', async (request) => {
+    const { branchId } = authorize(request, 'adjustments:write')
+    const { id } = request.params as { id: string }
+    const existing = ctx.db
+      .prepare('SELECT deleted_at FROM adjustments WHERE id = ? AND branch_id = ?')
+      .get(id, branchId) as { deleted_at: string | null } | undefined
+    if (!existing || existing.deleted_at) throw new AppError('NOT_FOUND', 'Không tìm thấy phát sinh')
+
+    const body = parseInput(createSchema, request.body)
+    requireCustomer(ctx.db, branchId, body.customerId)
+
+    ctx.db
+      .prepare('UPDATE adjustments SET customer_id = ?, date = ?, amount = ?, note = ? WHERE id = ? AND branch_id = ?')
+      .run(body.customerId, body.date, body.amount, body.note, id, branchId)
+    return toDto(ctx.db.prepare('SELECT * FROM adjustments WHERE id = ?').get(id) as AdjustmentRow)
+  })
+
   app.delete('/api/adjustments/:id', async (request) => {
     const { branchId } = authorize(request, 'adjustments:write')
     const { id } = request.params as { id: string }

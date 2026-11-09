@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Search, UserPlus, ChevronRight, ArrowDownWideNarrow, CalendarDays, Download } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { api } from '../api/httpApi'
@@ -91,8 +91,14 @@ export function CustomerForm({ open, onClose, initial }) {
 }
 
 export default function CustomersPage() {
+  const [searchParams] = useSearchParams()
   const [q, setQ] = useState('')
-  const [date, setDate] = useState(todayISO())
+  // The dashboard's "N khách còn nợ" link arrives with ?no=1&den=<date>.
+  const [date, setDate] = useState(() => {
+    const day = searchParams.get('den') ?? ''
+    return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : todayISO()
+  })
+  const [debtOnly, setDebtOnly] = useState(searchParams.get('no') === '1')
   const [sortDesc, setSortDesc] = useState(true)
   const [formOpen, setFormOpen] = useState(false)
   const [debouncedQ, setDebouncedQ] = useState('')
@@ -118,8 +124,8 @@ export default function CustomersPage() {
     reload,
   } = usePagedList(
     ({ offset, limit }) =>
-      api.customers.list({ q: debouncedQ, sort: sortDesc ? 'debt_desc' : 'debt_asc', asOf: date, limit, offset }),
-    { pageSize: CUSTOMERS_PAGE_SIZE, resetDeps: [debouncedQ, sortDesc, date], refreshDeps: [dataVersion] },
+      api.customers.list({ q: debouncedQ, sort: sortDesc ? 'debt_desc' : 'debt_asc', asOf: date, debtOnly, limit, offset }),
+    { pageSize: CUSTOMERS_PAGE_SIZE, resetDeps: [debouncedQ, sortDesc, date, debtOnly], refreshDeps: [dataVersion] },
   )
   const totalDebt = summary?.totalDebt ?? 0
 
@@ -227,6 +233,16 @@ export default function CustomersPage() {
         <p className="text-[13px] font-semibold text-slate-500">
           {matchCount} khách · tổng nợ <span className="text-amber-600">{fmtMoney(totalDebt)} đ</span>
         </p>
+        <div className="flex items-center gap-1">
+        <button
+          onClick={() => setDebtOnly((on) => !on)}
+          aria-pressed={debtOnly}
+          className={`rounded-lg px-2.5 py-1.5 text-[12.5px] font-semibold transition-colors active:scale-[0.97] ${
+            debtOnly ? 'bg-amber-50 text-amber-700' : 'text-slate-400 hover:bg-slate-50'
+          }`}
+        >
+          Còn nợ
+        </button>
         <button
           onClick={() => setSortDesc((v) => !v)}
           className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12.5px] font-semibold text-indigo-600 hover:bg-indigo-50"
@@ -234,6 +250,7 @@ export default function CustomersPage() {
           <ArrowDownWideNarrow size={15} />
           {sortDesc ? 'Nợ giảm dần' : 'Nợ tăng dần'}
         </button>
+        </div>
       </div>
 
       {error && shown.length === 0 ? (

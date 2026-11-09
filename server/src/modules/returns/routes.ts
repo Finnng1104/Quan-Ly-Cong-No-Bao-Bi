@@ -55,6 +55,10 @@ const createSchema = z.object({
 const listSchema = paginationSchema.extend({
   customerId: idSchema.optional(),
   date: isoDateSchema.optional(),
+  from: isoDateSchema.optional(),
+  to: isoDateSchema.optional(),
+  // Query strings carry no booleans; "1" lists the deleted ones instead, so they can be restored.
+  deleted: z.enum(['0', '1'], { error: 'Chỉ nhận 0 hoặc 1' }).default('0'),
 })
 
 export function registerReturnRoutes(app: FastifyInstance, ctx: AppContext): void {
@@ -112,7 +116,8 @@ export function registerReturnRoutes(app: FastifyInstance, ctx: AppContext): voi
     const { branchId } = authorize(request, 'returns:read')
     const query = parseInput(listSchema, request.query)
 
-    const conditions = ['branch_id = @branchId', 'deleted_at IS NULL']
+    const listDeleted = query.deleted === '1'
+    const conditions = ['branch_id = @branchId', listDeleted ? 'deleted_at IS NOT NULL' : 'deleted_at IS NULL']
     const params: Record<string, string | number> = { branchId }
     if (query.customerId) {
       conditions.push('customer_id = @customerId')
@@ -122,11 +127,21 @@ export function registerReturnRoutes(app: FastifyInstance, ctx: AppContext): voi
       conditions.push('date = @date')
       params['date'] = query.date
     }
+    if (query.from) {
+      conditions.push('date >= @from')
+      params['from'] = query.from
+    }
+    if (query.to) {
+      conditions.push('date <= @to')
+      params['to'] = query.to
+    }
     const where = conditions.join(' AND ')
+    // The one deleted by mistake a minute ago must be at the top, whatever its date.
+    const orderBy = listDeleted ? 'deleted_at DESC, date DESC, seq DESC' : 'date DESC, seq DESC'
 
     const rows = ctx.db
       .prepare(
-        `SELECT * FROM returns WHERE ${where} ORDER BY date DESC, seq DESC LIMIT @limit OFFSET @offset`,
+        `SELECT * FROM returns WHERE ${where} ORDER BY ${orderBy} LIMIT @limit OFFSET @offset`,
       )
       .all({ ...params, limit: query.limit, offset: query.offset }) as ReturnRow[]
     const total = (
@@ -170,6 +185,14 @@ export function registerReturnRoutes(app: FastifyInstance, ctx: AppContext): voi
     return toDto(requireRow(branchId, id))
   })
 
+  app.get('/api/returns/:id', async (request) => {
+    const { branchId } = authorize(request, 'returns:read')
+    const { id } = request.params as { id: string }
+    const row = requireRow(branchId, id)
+    if (row.deleted_at) throw new AppError('NOT_FOUND', 'Không tìm thấy phiếu trả hàng')
+    return toDto(row)
+  })
+
   // Editing keeps the code, sequence number and creation time so the ledger order stays stable.
   app.put('/api/returns/:id', async (request) => {
     const { branchId } = authorize(request, 'returns:write')
@@ -208,6 +231,17 @@ export function registerReturnRoutes(app: FastifyInstance, ctx: AppContext): voi
       })
       .immediate()
 
+    return toDto(requireRow(branchId, id))
+  })
+
+  app.post('/api/returns/:id/restore', async (request) => {
+    const { branchId } = authorize(request, 'returns:write')
+    const { id } = request.params as { id: string }
+    const row = requireRow(branchId, id)
+    // A return cannot come back for a customer who has been deleted meanwhile.
+    requireCustomer(ctx.db, branchId, row.customer_id)
+
+    ctx.db.prepare('UPDATE returns SET deleted_at = NULL WHERE id = ? AND branch_id = ?').run(id, branchId)
     return toDto(requireRow(branchId, id))
   })
 
